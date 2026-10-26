@@ -36,6 +36,18 @@ The integration lead owns deployment, GUI/audio, scripts, and this record.
 GMIT exploration. At most two implementation workers ran concurrently; the
 independent reviewer runs after integration work.
 
+### Upstream synchronization
+
+The fork's `master` was subsequently fast-forwarded from `4a469dc2` to official
+`isir/greta:master` at `ee52762c` (57 commits). The feature branch retains its
+Greta 2.1 and GMIT commits while integrating this master; its common ancestor was
+older, so it needed 69 upstream commits. Merge decisions and validation are
+recorded in `UPSTREAM_SYNC.md`. This source synchronization does not deploy new
+JARs or update `greta_2.1`; the P1 audiovisual acceptance below still describes the
+previously tested runtime. Completed future changes are committed with
+Conventional Commits and pushed to the task branch under the user's standing
+authorization, unless a later request says otherwise.
+
 ## P0 findings
 
 Greta runtime has `Modular.jar`, Ogre JAR/native Win64 libraries, CereProc JAR,

@@ -6,8 +6,8 @@ import pandas as pd
 import openai
 from tqdm import tqdm
 import codecs
-from mistralai import Mistral
-from mistralai.models import UserMessage, AssistantMessage, SystemMessage
+from mistralai.client import MistralClient
+from mistralai.models.chat_completion import ChatMessage
 
 api_key_file = os.path.join(os.path.dirname(__file__), 'api_key.txt')
 with open(api_key_file, 'r') as f:
@@ -36,10 +36,10 @@ def read_prompt_csv(role):
   return intent_detail_list
 
 # def get_completion_from_messages_local(messages, temperature=0.7, max_tokens=50):
-#     client = Mistral(api_key=MISTRAL_API_KEY)
+#     client = MistralClient(api_key=MISTRAL_API_KEY)
 #
 #
-#     response = client.chat.complete(
+#     response = client.chat(
 #         model=model,
 #         messages=messages,
 #         temperature=temperature,
@@ -57,14 +57,14 @@ def read_prompt_csv(role):
 def get_completion_from_messages_local(client,messages, temperature=0.7, max_tokens=50):
 
 
-    # response = client.chat.complete(
+    # response = client.chat(
     #     model=model,
     #     messages=messages,
     #     temperature=temperature,
     #     max_tokens=max_tokens,
     # )
 
-    response = client.chat.complete(
+    response = client.chat(
         model=model,
         messages=messages,
         temperature=temperature,
@@ -126,7 +126,7 @@ def create_message_client(intent_detail_list, utterance, context):
     #                                  >>>
     #                                  """
 
-    messages = [SystemMessage(content=system_prompt_template)]
+    messages = [ChatMessage(role= 'system', content= system_prompt_template)]
     return messages
 
 def create_message_therapist(intent_detail_list, utterance, context):
@@ -181,7 +181,7 @@ def create_message_therapist(intent_detail_list, utterance, context):
     #                                  """
 
 
-    messages = [SystemMessage(content=system_prompt_template)]
+    messages = [ChatMessage(role= 'system', content= system_prompt_template)]
 
     return messages
 

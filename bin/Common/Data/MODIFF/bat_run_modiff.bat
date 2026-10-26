@@ -6,17 +6,13 @@ call conda activate py312_modiff
 if %ERRORLEVEL% neq 0 goto ProcessError
 
 echo py312_modiff found
-set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-call python RealTimePipeFinal.py --buffer=64 --N=20 --K=20 --M=10
-
-pause
+call python RealTimePipeFinal.py --buffer=64 --N=20 --K=20 --M=5
 exit /b 0
 
 :ProcessError
 echo py312_modiff not found, creating env from .yml
 call conda env create -f env/py312_modiff.yml -y
 call conda activate py312_modiff
-set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-call python RealTimePipeFinal.py --buffer=64 --N=20 --K=20 --M=10
+call python RealTimePipeFinal.py --buffer=64 --N=20 --K=20 --M=5
 
 pause

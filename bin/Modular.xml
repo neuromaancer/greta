@@ -125,7 +125,6 @@
                 <item module="ASAP" name="ASAP"/>
                 <item module="MODIFF" name="MODIFF"/>
                 <item module="MODIFF_VQ" name="MODIFF_VQ"/>
-
                 <item module="Rest_Pose_Setter" name="Rest_Pose_Setter"/>
                 <item module="RestPoseSetterWithFeedback" name="RestPoseSetterWithFeedback"/>
                 <item module="ObjectNodeController" name="ObjectNodeController"/>

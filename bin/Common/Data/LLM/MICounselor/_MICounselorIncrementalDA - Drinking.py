@@ -6,8 +6,8 @@ import pickle
 import argparse
 from openai import OpenAI
 import sys
-from mistralai import Mistral
-from mistralai.models import UserMessage, AssistantMessage, SystemMessage
+from mistralai.client import MistralClient
+from mistralai.models.chat_completion import ChatMessage
 from therapist_behavior_inference import get_therapist_intent
 from client_behavior_inference import get_client_intent
 #from torchvision import messages
@@ -117,7 +117,7 @@ with open(api_key_file, 'r') as f:
     MISTRAL_API_KEY = f.read()
 
 model = "mistral-large-latest"
-client_online = Mistral(api_key=MISTRAL_API_KEY)
+client_online = MistralClient(api_key=MISTRAL_API_KEY)
 client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
 def ask(question,messages=None,messages_online=None):
@@ -201,11 +201,11 @@ def ask_online_chunk(question,language,system_prompt,messages=None):
 
     if language == 'FR':
         prompt=[
-         UserMessage(content= fr_prompt+system_prompt)
+         ChatMessage(role= "user", content= fr_prompt+system_prompt)
          ]
     else:
           prompt=[
-        UserMessage(content= en_prompt+system_prompt)
+        ChatMessage(role= "user", content= en_prompt+system_prompt)
          ] 
     context=""
     if messages is not None:
@@ -219,7 +219,7 @@ def ask_online_chunk(question,language,system_prompt,messages=None):
                     context += "Therapist:"
                 context+= msg.content
 
-    prompt.append(UserMessage(content=question))
+    prompt.append(ChatMessage(role="user", content=question))
     # da = get_client_intent(question,context)
     # serv2 = ExternalServer(host="localhost", port=50201)
     # serv2.start_server()
@@ -229,7 +229,7 @@ def ask_online_chunk(question,language,system_prompt,messages=None):
     # # serv2.close_server()
     context += "Patient: "+question
 
-    response = client_online.chat.stream(
+    response = client_online.chat_stream(
          model=model,
            messages=prompt
     )
@@ -239,8 +239,8 @@ def ask_online_chunk(question,language,system_prompt,messages=None):
     min_response_time = 1
     start = time.perf_counter()
     FIRST_SENTENCE = True
-    for event in response:
-        chunk = event.data
+    for chunk in response:
+        
         if chunk.choices[0].delta.content is None:
             pass
         elif chunk.choices[0].delta.content in [".","?","!",";"," ?"]:
@@ -301,8 +301,8 @@ def append_interaction_to_chat_log(question, answer, messages=None,messages_onli
         messages_online = []
     messages.append({"role":"user", "content":question})
     messages.append({"role":"assistant", "content":answer})
-    messages_online.append(UserMessage(content=question))
-    messages_online.append(AssistantMessage(content=answer))
+    messages_online.append(ChatMessage(role='user',content=question))
+    messages_online.append(ChatMessage(role='assistant',content=answer))
     return messages,messages_online
 
 # if __name__ == "__main__":
