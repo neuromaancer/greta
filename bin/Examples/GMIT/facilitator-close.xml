@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<bml>
+    <speech id="f_close" start="0.0" language="english" voice="marytts" type="SAPI4" text="">
+      <description level="1" type="gretabml"><reference>tmp/from-fml-apml.pho</reference></description>
+      <tm id="t1"/>
+      Thank you both. We can stay with those feelings together.
+      <tm id="t2"/>
+    </speech>
+</bml>

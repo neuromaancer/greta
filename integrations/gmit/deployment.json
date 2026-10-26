@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "files": [
+    "bin/Configurations/Greta/GMIT/GMIT - 3 characters - CereProc.xml",
+    "bin/Examples/GMIT/facilitator-open.xml",
+    "bin/Examples/GMIT/patient-a.xml",
+    "bin/Examples/GMIT/patient-b.xml",
+    "bin/Examples/GMIT/facilitator-close.xml",
+    "bin/GMIT/SmokeProbe.java",
+    "bin/GMIT/Start-GMIT.ps1",
+    "bin/GMIT/local/.gitignore"
+  ]
+}

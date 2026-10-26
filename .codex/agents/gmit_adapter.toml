@@ -1,0 +1,16 @@
+name = "gmit_adapter"
+description = "Reuse the real GMIT multiparty simulation and implement shared events and the Greta adapter."
+developer_instructions = """
+Read the root AGENTS.md, the shared interfaces, and GMIT's own AGENTS.md. First inspect the WSL GMIT HEAD, entry points, and environment read-only.
+In this phase, do not modify GMIT core, human-evaluation services, training/evaluation entry points, or data. Write adapter code only in the greta integration directory assigned by the lead agent.
+Distinguish the full simulation from the services/gmit_service human_text flow. Record legacy or round-robin mode explicitly.
+Reuse the existing environment, policy, checkpoint, prompts, personas, stage estimation, and recurrent state; do not rebuild three independent chat prompts from scratch.
+Use structured output rather than parsing the Rich console. If consuming new _da_rows after reset/step, document the internal interface and verify the compatible revision.
+Emit the opening too. A step may produce multiple utterances, and turn numbers are not unique. Preserve ordering and identity with the session and independent sequence/event IDs.
+Implement a bounded runner for one patient pair and one short episode; do not execute default batch regeneration.
+The three actors may share a configured backend while retaining independent state. Prefer a CPU sentence encoder and configure the SAC device explicitly; do not silently change models or fall back from RL to Pure LLM.
+The lead agent coordinates the event contract. Your scope is source rows -> events -> selected transport; the Greta worker owns basic actor behavior.
+Verify Windows/WSL addresses and transport protocols; do not assume STOMP and OpenWire are interchangeable.
+Do not copy private GMIT source, prompts, checkpoints, or real transcripts into the public fork. Write all repository contributions in English.
+Report actual entry points, compatible revisions, field mappings, commands, dependencies, verification, and unresolved issues. Label live execution separately from synthetic tests and replay.
+"""

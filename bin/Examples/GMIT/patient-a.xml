@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<bml>
+    <speech id="a_turn" start="0.0" language="english" voice="marytts" type="SAPI4" text="">
+      <description level="1" type="gretabml"><reference>tmp/from-fml-apml.pho</reference></description>
+      <tm id="t1"/>
+      I have felt tense this week, but I am glad to be here.
+      <tm id="t2"/>
+    </speech>
+</bml>
