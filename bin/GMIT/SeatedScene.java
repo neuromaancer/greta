@@ -15,10 +15,11 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-/** Optional synthetic group-MI scenery and seated lower-body overlay. */
+/** Shared group-MI scenery, seated legs, and optional tabletop arm pose. */
 public final class SeatedScene {
     private static final String ROOM_FILE = "./Environments/GMIT/group-mi-room.xml";
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
+    private static final boolean ARMS = Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true"));
     private static final List<PoseController> CONTROLLERS = new ArrayList<PoseController>();
     private static volatile boolean installed;
     private static volatile Throwable poseFailure;
@@ -99,7 +100,14 @@ public final class SeatedScene {
             if (!isKnownActor(actor) || poses.containsKey(actor)) throw new IllegalArgumentException("Invalid or duplicate room seat actor: " + actor);
             poses.put(actor, new PoseSpec(number(seat, "x", 0), number(seat, "z", 0),
                     number(seat, "yaw_degrees", 0), number(seat, "root_vertical_mm", 0), number(seat, "hip_degrees", 0),
-                    number(seat, "knee_degrees", 0), number(seat, "ankle_degrees", 0), number(seat, "sacroiliac_degrees", 0)));
+                    number(seat, "knee_degrees", 0), number(seat, "ankle_degrees", 0), number(seat, "sacroiliac_degrees", 0),
+                    number(seat, "l_shoulder_flexion_degrees", 0), number(seat, "r_shoulder_flexion_degrees", 0),
+                    number(seat, "l_shoulder_abduct_degrees", 0), number(seat, "r_shoulder_abduct_degrees", 0),
+                    number(seat, "l_elbow_flexion_degrees", 0), number(seat, "r_elbow_flexion_degrees", 0),
+                    number(seat, "l_elbow_twisting_degrees", 0), number(seat, "r_elbow_twisting_degrees", 0),
+                    number(seat, "l_wrist_flexion_degrees", 0), number(seat, "r_wrist_flexion_degrees", 0),
+                    number(seat, "l_wrist_pivot_degrees", 0), number(seat, "r_wrist_pivot_degrees", 0),
+                    number(seat, "l_wrist_twisting_degrees", 0), number(seat, "r_wrist_twisting_degrees", 0)));
         }
         for (String actor : ACTORS) if (!poses.containsKey(actor)) throw new IllegalArgumentException("Room seat is missing actor: " + actor);
         return new RoomLayout(root, poses, number(root, "camera_x", 0), number(root, "camera_y", 1.5),
@@ -206,14 +214,18 @@ public final class SeatedScene {
     }
 
     private static final class PoseSpec {
-        private final double x, z, yaw, vertical, hip, knee, ankle, sacroiliac;
-        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac) {
+        private final double x, z, yaw, vertical, hip, knee, ankle, sacroiliac, lShoulderFlexion, rShoulderFlexion, lShoulderAbduct, rShoulderAbduct, lElbowFlexion, rElbowFlexion, lElbowTwisting, rElbowTwisting, lWristFlexion, rWristFlexion, lWristPivot, rWristPivot;
+        private final double lWristTwisting, rWristTwisting;
+        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting) {
             this.x = x; this.z = z; this.yaw = yaw; this.vertical = vertical;
             this.hip = hip; this.knee = knee; this.ankle = ankle; this.sacroiliac = sacroiliac;
+            this.lShoulderFlexion = lShoulderFlexion; this.rShoulderFlexion = rShoulderFlexion; this.lShoulderAbduct = lShoulderAbduct; this.rShoulderAbduct = rShoulderAbduct;
+            this.lElbowFlexion = lElbowFlexion; this.rElbowFlexion = rElbowFlexion; this.lElbowTwisting = lElbowTwisting; this.rElbowTwisting = rElbowTwisting; this.lWristFlexion = lWristFlexion; this.rWristFlexion = rWristFlexion; this.lWristPivot = lWristPivot; this.rWristPivot = rWristPivot;
+            this.lWristTwisting = lWristTwisting; this.rWristTwisting = rWristTwisting;
         }
     }
 
-    /** Redirects body frames through a lower-body overlay without touching face, lip, or arm channels. */
+    /** Redirects body frames through a seated lower-body and tabletop-arm overlay without touching face or lip channels. */
     private static final class PoseController {
         private final String actor; private final PoseSpec pose; private final Object avatar, body; private final ClassLoader loader;
         private Object proxy;
@@ -264,7 +276,7 @@ public final class SeatedScene {
 
         private Object forward(List<?> source, Object id) throws Exception {
             List<Object> overlaid = new ArrayList<Object>();
-            for (Object frame : source) { Object copy = frame.getClass().getMethod("clone").invoke(frame); overlay(copy); overlaid.add(copy); }
+            for (Object frame : source) { Object copy = frame.getClass().getMethod("clone").invoke(frame); overlay(copy); ListenerGaze.applyBody(actor, copy); overlaid.add(copy); }
             return SeatedScene.invoke(avatar, "performBAPFrames", overlaid, id);
         }
 
@@ -274,6 +286,15 @@ public final class SeatedScene {
             setDegrees(frame, typeClass, "l_hip_flexion", pose.hip); setDegrees(frame, typeClass, "r_hip_flexion", pose.hip);
             setDegrees(frame, typeClass, "l_knee_flexion", pose.knee); setDegrees(frame, typeClass, "r_knee_flexion", pose.knee);
             setDegrees(frame, typeClass, "l_ankle_flexion", pose.ankle); setDegrees(frame, typeClass, "r_ankle_flexion", pose.ankle);
+            if (ARMS) {
+            setDegrees(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion); setDegrees(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
+            setDegrees(frame, typeClass, "l_shoulder_abduct", pose.lShoulderAbduct); setDegrees(frame, typeClass, "r_shoulder_abduct", pose.rShoulderAbduct);
+            setDegrees(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion); setDegrees(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
+            setDegrees(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting); setDegrees(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
+            setDegrees(frame, typeClass, "l_wrist_flexion", pose.lWristFlexion); setDegrees(frame, typeClass, "r_wrist_flexion", pose.rWristFlexion);
+            setDegrees(frame, typeClass, "l_wrist_pivot", pose.lWristPivot); setDegrees(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
+            setDegrees(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting); setDegrees(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
+            }
             setValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
             setValue(frame, typeClass, "HumanoidRoot_tr_vertical", (int)Math.round(pose.vertical));
             setValue(frame, typeClass, "HumanoidRoot_tr_frontal", (int)Math.round(pose.z * 1000.0));
@@ -290,6 +311,18 @@ public final class SeatedScene {
             assertMask(frame, typeClass, "sacroiliac_tilt"); assertDegrees(frame, typeClass, "sacroiliac_tilt", pose.sacroiliac);
             assertMask(frame, typeClass, "l_ankle_flexion"); assertDegrees(frame, typeClass, "l_ankle_flexion", pose.ankle);
             assertMask(frame, typeClass, "r_ankle_flexion"); assertDegrees(frame, typeClass, "r_ankle_flexion", pose.ankle);
+            if (ARMS) {
+            assertMask(frame, typeClass, "l_shoulder_flexion"); assertDegrees(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion);
+            assertMask(frame, typeClass, "r_shoulder_flexion"); assertDegrees(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
+            assertMask(frame, typeClass, "l_elbow_flexion"); assertDegrees(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion);
+            assertMask(frame, typeClass, "r_elbow_flexion"); assertDegrees(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
+            assertMask(frame, typeClass, "l_elbow_twisting"); assertDegrees(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting);
+            assertMask(frame, typeClass, "r_elbow_twisting"); assertDegrees(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
+            assertMask(frame, typeClass, "l_wrist_pivot"); assertDegrees(frame, typeClass, "l_wrist_pivot", pose.lWristPivot);
+            assertMask(frame, typeClass, "r_wrist_pivot"); assertDegrees(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
+            assertMask(frame, typeClass, "l_wrist_twisting"); assertDegrees(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting);
+            assertMask(frame, typeClass, "r_wrist_twisting"); assertDegrees(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
+            }
             assertMask(frame, typeClass, "HumanoidRoot_rt_body_turn"); assertDegrees(frame, typeClass, "HumanoidRoot_rt_body_turn", pose.yaw);
             assertValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
             assertValue(frame, typeClass, "HumanoidRoot_tr_frontal", (int)Math.round(pose.z * 1000.0));

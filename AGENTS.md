@@ -191,16 +191,32 @@ The synthetic group MI extension uses the same scene and actor chains. Its
 bounded XML script generates one speech-only BML file per turn under the local
 run directory, reusing the existing actor readers. Keep the fixture explicitly
 synthetic and preserve its text, unique event IDs, and actor order. Parser-only
-validation must not start Modular or a model backend. This extension does not
-establish P2 gaze/gesture or authentic GMIT replay acceptance.
+validation must not start Modular or a model backend. The original synthetic
+acceptance did not establish P2 gaze/gesture or authentic GMIT replay acceptance;
+later extensions have separate evidence records.
 
 `bin/GMIT/SeatedScene.java` adds only the room nodes from
-`bin/Environments/GMIT/group-mi-room.xml` and overlays the lower-body BAP pose.
+`bin/Environments/GMIT/group-mi-room.xml` and overlays the seated legs and
+configurable tabletop arm BAP pose.
 Do not replace the active Environment root, double-apply seat coordinates to
 both the Environment parent and BAP root, or let speech reset the seated legs.
 Keep face/lip/blink channels independent. Preview furniture placement and actual
 joint bending before audible playback; numerical pose checks alone do not prove
 that a character is visibly aligned with a chair.
+
+`bin/GMIT/ListenerGaze.java` binds each listener to the active speaker's actual
+avatar head node. For these Autodesk avatars, the skull position includes bone
+rotation but not the external Ogre agent-node translation: add root BAP
+translation once, and subtract listener root yaw when computing local gaze.
+Stock character-name gaze targets use static avatar coordinates and are not a
+drop-in replacement for this seated configuration. Keep the head transition
+bounded and change only cervical yaw/pitch and the four eye FAP channels after
+LipBlender. Preserve jaw, lips, eyelids, seated limbs, and root placement.
+Idle listeners need finite gaze-only frames because they may emit no body frames.
+Gaze owns the cervical channels while enabled; independent nod/gesture blending
+is not established. Use `-DisableListenerGaze` or `-DisableTabletopArms` for
+isolation. The NetBeans child forwards `gmit.gaze.enabled`, `gmit.gaze.head`,
+`gmit.gaze.eyes`, and `gmit.pose.arms` JVM properties.
 
 The global IniManager loads `./Greta.ini` from the runtime working directory.
 The current graph does not need an additional Ini Manager UI node: its explicit

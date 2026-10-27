@@ -289,6 +289,7 @@ public final class SmokeProbe {
     private static void sampleFaces(int sequence, String speaker) throws Exception {
         SeatedScene.checkHealthy();
         SeatedScene.verifyPose();
+        ListenerGaze.verify();
         for (String actor : audio.keySet()) {
             Object frame = call(objects.get("gmit-"+actor+"-avatar"),"getCurrentFAPFrame");
             int jaw = (Integer)call(frame,"getValue",new Class<?>[]{int.class},3);
@@ -357,6 +358,7 @@ public final class SmokeProbe {
         if (caption != null) caption.checkCancelled();
         if (caption != null) caption.show(ordinal, total, scenarioTurn, activeProvenance);
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
+        ListenerGaze.focus(actor);
         log("dispatch sequence=" + ordinal + " actor=" + actor + " reader=" + readerId + " file=" + bml.getName());
         if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " source_event_id=" + scenarioTurn.sourceEventId + " source_turn=" + scenarioTurn.sourceTurn + " chunk=" + scenarioTurn.chunkIndex + "/" + scenarioTurn.chunkCount + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
         call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
@@ -390,6 +392,7 @@ public final class SmokeProbe {
             assertAudioCounts(scheduled);
             if ("Synthetic authored dialogue".equals(activeProvenance)) capture(String.format("%02d-%s-%03d", ordinal, actor, frame++));
             else if ((ordinal <= 3 || ordinal == total || ordinal % 25 == 0) && frame++ == 0) capture(String.format("%03d-%s", ordinal, actor));
+            if (scenarioTurn != null && frame == 12) capture(String.format("gaze-%03d-%s", ordinal, actor));
             sampleFaces(ordinal,actor); Thread.sleep(100);
         }
         assertAudioCounts(scheduled);
@@ -414,8 +417,9 @@ public final class SmokeProbe {
         catch (CancelledException cancelled) { log("CANCELLED " + cancelled.getMessage()); }
         catch (Throwable e) { log("FAILED " + e); e.printStackTrace(); }
         finally {
+            ListenerGaze.close();
             SeatedScene.close();
-            try { SeatedScene.checkHealthy(); }
+            try { SeatedScene.checkHealthy(); ListenerGaze.checkHealthy(); }
             catch (Throwable e) { log("FAILED seated_cleanup " + e); status = 1; }
             System.exit(status);
         }
@@ -476,7 +480,7 @@ public final class SmokeProbe {
         }
         hideAutomaticReaderFrames();
         Caption caption = scenario == null ? null : new Caption(scenario.title);
-        if (scenario != null) SeatedScene.install(objects);
+        if (scenario != null) { SeatedScene.install(objects); ListenerGaze.install(objects); }
         Thread.sleep(2000);
         SeatedScene.verifyPose();
         capture("00-scene");
@@ -484,6 +488,13 @@ public final class SmokeProbe {
             title("Seated group MI preview — no speech");
             Thread.sleep(3000);
             capture("01-seated-preview");
+            for (String actor : ACTORS) {
+                ListenerGaze.focus(actor);
+                Thread.sleep(1800);
+                SeatedScene.verifyPose();
+                ListenerGaze.verify();
+                capture("02-gaze-" + actor);
+            }
             SeatedScene.checkHealthy();
             log("COMPLETE mode=seated_preview speech=false");
             return;

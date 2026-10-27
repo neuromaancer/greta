@@ -5,7 +5,8 @@ facilitator and two fictional participants discuss reducing red meat. It is a
 repeatable engineering demonstration, not generated GMIT output or evidence of
 clinical effectiveness. No LLM, policy checkpoint, training, or evaluation is run.
 
-The group demo adds a table, three chairs, and a seated lower-body pose. The
+The group demo adds a table, three chairs, a seated pose with hands on the table,
+and listener eye/head gaze toward the current speaker. The
 furniture uses the complete package's existing Office resources. The original
 standing four-line smoke configuration remains available with `-Smoke`.
 
@@ -24,7 +25,7 @@ is a three-second gap between turns and a ten-second hold at the end. The proces
 then exits. Override these delays with `-StartDelaySeconds`, `-TurnGapSeconds`,
 and `-EndHoldSeconds`. Close any other Java/Greta instance before starting.
 The caption window identifies the speaker, authored stage, and full utterance.
-Its **Stop synthetic run** button requests cancellation of this run. The
+Its **Stop run** button requests cancellation of this run. The
 launcher then restores the same runtime scratch files as it does after completion.
 Avoid operating the original BML reader windows during automatic playback;
 this runtime does not expose their frames to the probe for hiding.
@@ -76,7 +77,7 @@ overrides the old developer-specific path in the default configuration.
 Right-click **Modular > Run**, or make Modular the main project and press **F6**.
 The opt-in launcher compiles the small demo
 helpers, launches the seated scene with captions, and plays the same 13-turn
-script. Use **Stop synthetic run** in the caption window to cancel. Let the
+script. Use **Stop run** in the caption window to cancel. Let the
 launcher finish restoring its scratch files before another launch.
 
 The original XML argument still only opens the Modular graph and its individual
@@ -166,18 +167,36 @@ and cleanup; the supplied 13-turn configuration defaults to a 530-second limit.
 `bin/Environments/GMIT/group-mi-room.xml` defines the furniture, camera, seat
 positions, and static joint angles. `SeatedScene.java` adds those room nodes
 without replacing the active Environment. It routes each actor's body frames
-through a lower-body overlay, preserving seated hips, knees, ankles, pelvis,
-and root placement while leaving speech, face, and arm channels unchanged.
+through a pose overlay, preserving seated hips, knees, ankles, pelvis,
+root placement, and the configured shoulder/elbow/wrist pose during speech.
 The probe checks every overlaid channel against actual avatar BAP frames during
 playback. Existing `object.table`, `object.chair`, and `object.floor` resources
 are reused; no meshes or weights are copied. Known furniture meshes ignore Leaf
 size metadata in this renderer, so layout offsets account for their actual bounds.
-This is a fixed seated pose, not a generated sitting transition or contact-aware
-hand/arm animation.
+This is a calibrated fixed pose for these three avatars, not a collision solver,
+generated sitting transition, or contact-aware hand/arm animation.
+
+`ListenerGaze.java` updates the two listeners when the speaker changes. It binds
+to the existing avatars' rendered head nodes, accounts for seated root BAP
+translation and yaw, and smooths bounded head/eye turns over 18 Greta frames
+(0.72 seconds at 25 fps). The current speaker returns to the forward seated pose.
+Only cervical yaw/pitch and four eyeball FAP channels are controlled. LipBlender
+output is cloned before those eye channels change; mouth and eyelid masks remain
+intact. Finite gaze-only frames also move idle listeners without requiring speech.
+Gaze has priority over concurrent cervical gestures; independent nod/gesture
+composition is not verified.
+
+Use `-DisableListenerGaze` or `-DisableTabletopArms` with the PowerShell launcher
+to isolate the behaviors. In NetBeans, add `-Dgmit.gaze.enabled=false` or
+`-Dgmit.pose.arms=false` to VM Options; the parent forwards them to its child.
+`-Dgmit.gaze.head=false` and `-Dgmit.gaze.eyes=false` isolate individual gaze
+channels. Existing speech, captions, actor mapping, and transcript order are
+independent of these switches. The silent `-GroupMI -Preview` also captures all
+three speaker-target states before exiting.
 
 ## Deployment and evidence
 
-The eleven-file allowlist includes the scenario, room XML, seated-pose helper,
+The twelve-file allowlist includes the scenario, room XML, seated-pose and gaze helpers,
 launcher, probe, original scene and BML examples, and local-output ignore file.
 Every listed file maps to the identical relative path in `greta_2.1`; the other
 P1 assets remain unchanged. Use `integrations/gmit/deploy.py` to preview and apply,
@@ -189,8 +208,9 @@ Local runs are stored under `bin/GMIT/local/group-mi-*/`, including logs,
 generated BML, WAV audio, and render-texture PNGs. These artifacts stay ignored.
 An audio callback and elapsed schedule establish software behavior; they do not
 establish sound heard from the physical speakers. Render-texture evidence and
-human visual/audible observation are reported separately. Listener gaze,
-head gestures, and live GMIT generation remain unverified.
+human visual/audible observation are reported separately. Later posture/gaze
+evidence appears below; original acceptance sections describe their earlier
+versions. Independent head gestures and live per-step playback remain unverified.
 
 ## Earlier standing demo acceptance, 2026-10-27
 
@@ -303,3 +323,67 @@ The existing four-line standing smoke mode remains separate. Dynamic listener
 gaze, nods/gestures, authentic GMIT replay, and live model generation are still
 outside this acceptance. The independent integration reviewer checked the
 actual code changes, lifecycle handling, deployment mapping, and evidence.
+
+## Tabletop posture and listener gaze, 2026-10-27
+
+The user reported hands intersecting the chairs and bodies intersecting the table.
+The facilitator and chair moved back by 0.18 m; each patient and chair moved
+outward by 0.12 m relative to the earlier accepted scene. Shoulder/elbow and
+wrist rotations now hold both palms downward at the tabletop. Only the existing
+room XML and small runtime helpers changed; meshes, voices, checkpoints, and
+production JARs were preserved. This calibration covers LENA, EDDY, and LAURA in
+the supplied scene, not arbitrary avatars, furniture, or dynamic collision physics.
+
+The final silent preview `group-mi-20261027-164007-118` completed all three
+speaker-target states. Render captures show the two listeners turning toward
+each active speaker and no obvious hand/torso intersection with the tabletop
+in the tested view. Actual neck and eye channels matched the bounded targets.
+The separate `group-mi-20261027-164156-630` preview disabled listener gaze and
+completed with the tabletop posture intact. The first gaze preview exposed that
+idle actors emitted no new body frames; finite gaze-only transition frames fixed
+that failure before speech acceptance. Earlier arm previews were calibration
+attempts, not accepted final poses.
+
+The existing seven-utterance Pure bundle was then replayed with these changes;
+no new model generation ran. `replay-20261027-164532-884` exited 0 with seven
+dispatches, seven audio callbacks, seven elapsed schedule intervals, and 21
+gaze-state verifications. Original F-A-B-F-A-B-F order and actor counts
+(F=3, A=2, B=2) were retained. Audio durations were 4.281-11.541 seconds.
+Each actor had 702 face samples, with jaw movement on the active actor and
+eyelid values reaching 940. Inactive-mouth and seated-arm/leg checks passed
+throughout playback. Nine render captures and seven WAV files remain local.
+
+These are rendered and software-channel observations. A new human audiovisual
+confirmation for this revision is pending; previous user confirmations belong
+to the earlier scene. The evidence does not establish exact ocular fixation,
+continuous tracking of freely moving actors, arbitrary gesture composition, or
+physical audio completion for every sample. The Windows JDK 8 source entry was
+compiled with the new helper; actual NetBeans F6 interaction remains unverified.
+
+Independent review found no code or render-evidence blocker. All 42 loaded graph
+modules came from the complete runtime package. All twelve deployed files match
+source and the final receipt, and all seven saved runtime baseline file hashes
+match after cleanup. The runtime's 67 pre-existing Git status entries are
+unchanged. The only new deployment mapping is
+`greta/bin/GMIT/ListenerGaze.java` to `greta_2.1/bin/GMIT/ListenerGaze.java`.
+Other changed deployed paths are `SmokeProbe.java`, `SeatedScene.java`, and
+`Start-GMIT.ps1` under `bin/GMIT/`, and
+`bin/Environments/GMIT/group-mi-room.xml`, each at the same runtime-relative path.
+
+The final receipt is `deploy-20261027T154504069359Z/receipt.json`. To restore the
+complete pre-task helper/configuration state, roll back all six task receipts in
+reverse order from the development checkout; stop if a later edit is detected:
+
+```sh
+for receipt in \
+  deploy-20261027T154504069359Z \
+  deploy-20261027T153956647549Z \
+  deploy-20261027T153526521970Z \
+  deploy-20261027T153001106000Z \
+  deploy-20261027T152502279485Z \
+  deploy-20261027T152009167558Z
+do
+  python3 integrations/gmit/deploy.py --runtime ../greta_2.1 \
+    --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
+done
+```

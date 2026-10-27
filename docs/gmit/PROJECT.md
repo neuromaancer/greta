@@ -97,7 +97,8 @@ remain unverified. No checkpoint or model was loaded or downloaded.
 All three CharacterManagers share one Environment. Each has independent
 Realizer, TTS, CereProc, body, face, lip model/blender, audio, and MPEG4 avatar.
 Blinking remains enabled. The logical actor IDs above are not assumed to equal
-the renderer's generated object identifiers; no gaze targets are claimed.
+the renderer's generated object identifiers. Initial P1 did not bind gaze
+targets; the later seated extension resolves each avatar's actual head node.
 Planner instances remain available, but the synthetic inputs are speech-only
 BML readers connected directly to each actor's Realizer.
 
@@ -120,9 +121,9 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete eleven-file allowlist: the scene,
+`integrations/gmit/deployment.json` is the complete twelve-file allowlist: the scene,
 four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
-source, seated-pose helper, room layout, and local-output ignore file. Every source path maps to the identical
+source, seated-pose helper, listener-gaze helper, room layout, and local-output ignore file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,
 deployment tooling and this document remain in the development checkout.
@@ -228,7 +229,10 @@ instrumentation was used instead, without claiming desktop-tool observation.
 Authentic GMIT generation followed by replay, and offline transcript import,
 are now accepted as described in [REPLAY.md](REPLAY.md). The external adapter
 preserves event identities, text, actors, order, and available annotations.
-Remaining P2 work is verified gaze/head/gesture target binding. Live per-step
+Listener gaze now passes three-speaker render and channel checks while replaying
+speech, with tabletop hand posture preserved; see the later posture/gaze record
+in [GROUP_MI.md](GROUP_MI.md). Independent nod/gesture composition remains P2 work.
+Live per-step
 playback and RL execution remain unverified: the current Pure function returns
 a whole episode before playback. A later live adapter must capture the reset
 opening and every newly added row, including multiple rows sharing a source

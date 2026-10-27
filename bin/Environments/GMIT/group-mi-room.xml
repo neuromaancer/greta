@@ -2,9 +2,25 @@
 <!-- Incrementally attached by SeatedScene; it never replaces the active Environment root. -->
 <node id="gmit-group-mi-room" camera_x="0.0" camera_y="1.5" camera_z="4.0" camera_pitch_degrees="-12.0">
     <!-- Seat metadata is consumed by SeatedScene; values are meters/degrees. -->
-    <seat actor_id="facilitator" x="0.0" z="-0.60" yaw_degrees="0.0" root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"/>
-    <seat actor_id="patient-a" x="-0.90" z="0.0" yaw_degrees="50.0" root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"/>
-    <seat actor_id="patient-b" x="0.90" z="0.0" yaw_degrees="-50.0" root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"/>
+    <!-- BAP arm angles are explicit, persistent tabletop-rest parameters, separate from face/lip/blink channels. -->
+    <seat actor_id="facilitator" x="0.0" z="-0.78" yaw_degrees="0.0"
+          root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
+          l_shoulder_flexion_degrees="-20.0" r_shoulder_flexion_degrees="-20.0" l_shoulder_abduct_degrees="0.0" r_shoulder_abduct_degrees="0.0"
+          l_elbow_flexion_degrees="-70.0" r_elbow_flexion_degrees="-70.0" l_elbow_twisting_degrees="0.0" r_elbow_twisting_degrees="0.0"
+          l_wrist_flexion_degrees="0.0" r_wrist_flexion_degrees="0.0" l_wrist_pivot_degrees="0.0" r_wrist_pivot_degrees="0.0"
+          l_wrist_twisting_degrees="-90.0" r_wrist_twisting_degrees="90.0"/>
+    <seat actor_id="patient-a" x="-1.02" z="0.0" yaw_degrees="50.0"
+          root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
+          l_shoulder_flexion_degrees="-20.0" r_shoulder_flexion_degrees="-20.0" l_shoulder_abduct_degrees="0.0" r_shoulder_abduct_degrees="0.0"
+          l_elbow_flexion_degrees="-70.0" r_elbow_flexion_degrees="-70.0" l_elbow_twisting_degrees="0.0" r_elbow_twisting_degrees="0.0"
+          l_wrist_flexion_degrees="0.0" r_wrist_flexion_degrees="0.0" l_wrist_pivot_degrees="0.0" r_wrist_pivot_degrees="0.0"
+          l_wrist_twisting_degrees="-90.0" r_wrist_twisting_degrees="90.0"/>
+    <seat actor_id="patient-b" x="1.02" z="0.0" yaw_degrees="-50.0"
+          root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
+          l_shoulder_flexion_degrees="-20.0" r_shoulder_flexion_degrees="-20.0" l_shoulder_abduct_degrees="0.0" r_shoulder_abduct_degrees="0.0"
+          l_elbow_flexion_degrees="-70.0" r_elbow_flexion_degrees="-70.0" l_elbow_twisting_degrees="0.0" r_elbow_twisting_degrees="0.0"
+          l_wrist_flexion_degrees="0.0" r_wrist_flexion_degrees="0.0" l_wrist_pivot_degrees="0.0" r_wrist_pivot_degrees="0.0"
+          l_wrist_twisting_degrees="-90.0" r_wrist_twisting_degrees="90.0"/>
     <node id="gmit-group-mi-floor">
         <position x="-3.0" y="-0.04" z="-2.5"/>
         <leaf id="gmit-group-mi-floor-leaf" reference="object.floor">
@@ -20,21 +36,21 @@
     </node>
     <node id="gmit-group-mi-chair-facilitator">
         <!-- chair1.mesh is min-corner anchored; its 0.569 x 0.528 m centre is the seat centre. -->
-        <position x="-0.2845" y="0.0" z="-0.8640"/>
+        <position x="-0.2845" y="0.0" z="-1.0440"/>
         <orientation x="0.0" y="0.0" z="0.0"/>
         <leaf id="gmit-group-mi-chair-facilitator-leaf" reference="object.chair">
             <size x="0.569" y="0.943" z="0.528"/>
         </leaf>
     </node>
     <node id="gmit-group-mi-chair-patient-a">
-        <position x="-1.2850" y="0.0" z="0.0470"/>
+        <position x="-1.4050" y="0.0" z="0.0470"/>
         <orientation x="0.0" y="50.0" z="0.0"/>
         <leaf id="gmit-group-mi-chair-patient-a-leaf" reference="object.chair">
             <size x="0.569" y="0.943" z="0.528"/>
         </leaf>
     </node>
     <node id="gmit-group-mi-chair-patient-b">
-        <position x="0.9190" y="0.0" z="-0.3880"/>
+        <position x="1.0390" y="0.0" z="-0.3880"/>
         <orientation x="0.0" y="-50.0" z="0.0"/>
         <leaf id="gmit-group-mi-chair-patient-b-leaf" reference="object.chair">
             <size x="0.569" y="0.943" z="0.528"/>
