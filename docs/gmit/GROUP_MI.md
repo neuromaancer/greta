@@ -353,9 +353,11 @@ Each actor had 702 face samples, with jaw movement on the active actor and
 eyelid values reaching 940. Inactive-mouth and seated-arm/leg checks passed
 throughout playback. Nine render captures and seven WAV files remain local.
 
-These are rendered and software-channel observations. A new human audiovisual
-confirmation for this revision is pending; previous user confirmations belong
-to the earlier scene. The evidence does not establish exact ocular fixation,
+The user subsequently confirmed this revision's seven-utterance replay
+(translated from Chinese): "Hands, body, gaze, audio, and lip synchronization
+are all normal." This adds human audiovisual acceptance of the tested tabletop
+posture and speaker-following gaze to the rendered and software-channel checks.
+The evidence does not establish exact ocular fixation,
 continuous tracking of freely moving actors, arbitrary gesture composition, or
 physical audio completion for every sample. The Windows JDK 8 source entry was
 compiled with the new helper; actual NetBeans F6 interaction remains unverified.
