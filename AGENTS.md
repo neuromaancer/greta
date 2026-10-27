@@ -94,8 +94,9 @@ The three-character entry point is
 `bin/GMIT/Start-GMIT.ps1` from the complete runtime package. A normal launch opens
 the scene for manual dispatch through the four numbered readers; `-Smoke` runs
 the bounded synthetic F -> A -> B -> F sequence. `-GroupMI` plays the authored
-13-turn red-meat-reduction group MI example, with captions and slower observation
-defaults. Its source is `bin/Examples/GMIT/group-mi-red-meat.xml`; stage and act
+13-turn red-meat-reduction group MI example, with a table, seated characters,
+captions, and slower observation defaults. `-GroupMI -Preview` checks the layout
+without speech. Its script is `bin/Examples/GMIT/group-mi-red-meat.xml`; stage and act
 labels are author annotations. See `docs/gmit/GROUP_MI.md` for its contract and
 evidence. Commands and optional
 observation delays are documented in `docs/gmit/PROJECT.md`. Do not describe this
@@ -103,10 +104,12 @@ synthetic smoke test as a real GMIT simulation.
 
 The existing Ogre/CereProc path was verified with Windows 64-bit JDK 8. Do not
 blindly inherit system `JAVA_HOME` or the JDK used to run NetBeans itself. The
-launcher accepts an explicit `-JavaHome`. In NetBeans, open `application/Modular`
-and configure the project's JDK, complete runtime `bin` working directory, scene
-argument, and Win64 DLL path separately. Replace other developers' absolute paths
-in local settings. IDE source execution and the accepted runtime JARs come from
+launcher accepts an explicit `-JavaHome`. In NetBeans, open the development
+checkout's `application/Modular` and select the `GMIT Group MI` configuration
+(`--gmit-group-mi`). Configure the project's JDK, complete runtime `bin` working
+directory, and Win64 DLL path separately. The XML argument remains the original
+manual scene entry. See `docs/gmit/GROUP_MI.md` for settings and recovery after
+force-killing the IDE parent. IDE source execution and the accepted runtime JARs come from
 different builds; compilation success does not establish runtime acceptance.
 
 `integrations/gmit/deployment.json` is the deployment allowlist. `deploy.py`
@@ -183,6 +186,14 @@ run directory, reusing the existing actor readers. Keep the fixture explicitly
 synthetic and preserve its text, unique event IDs, and actor order. Parser-only
 validation must not start Modular or a model backend. This extension does not
 establish P2 gaze/gesture or authentic GMIT replay acceptance.
+
+`bin/GMIT/SeatedScene.java` adds only the room nodes from
+`bin/Environments/GMIT/group-mi-room.xml` and overlays the lower-body BAP pose.
+Do not replace the active Environment root, double-apply seat coordinates to
+both the Environment parent and BAP root, or let speech reset the seated legs.
+Keep face/lip/blink channels independent. Preview furniture placement and actual
+joint bending before audible playback; numerical pose checks alone do not prove
+that a character is visibly aligned with a chair.
 
 The global IniManager loads `./Greta.ini` from the runtime working directory.
 The current graph does not need an additional Ini Manager UI node: its explicit

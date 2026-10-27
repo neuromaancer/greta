@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Incrementally attached by SeatedScene; it never replaces the active Environment root. -->
+<node id="gmit-group-mi-room" camera_x="0.0" camera_y="1.5" camera_z="4.0" camera_pitch_degrees="-12.0">
+    <!-- Seat metadata is consumed by SeatedScene; values are meters/degrees. -->
+    <seat actor_id="facilitator" x="0.0" z="-0.60" yaw_degrees="0.0" root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"/>
+    <seat actor_id="patient-a" x="-0.90" z="0.0" yaw_degrees="50.0" root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"/>
+    <seat actor_id="patient-b" x="0.90" z="0.0" yaw_degrees="-50.0" root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"/>
+    <node id="gmit-group-mi-floor">
+        <position x="-3.0" y="-0.04" z="-2.5"/>
+        <leaf id="gmit-group-mi-floor-leaf" reference="object.floor">
+            <size x="6.0" y="0.01" z="5.0"/>
+        </leaf>
+    </node>
+    <node id="gmit-group-mi-table">
+        <!-- table.mesh is min-corner anchored; centre its 1.6976 m footprint at (0, 0, .30). -->
+        <position x="-0.85" y="0.0" z="-0.55"/>
+        <leaf id="gmit-group-mi-table-leaf" reference="object.table">
+            <size x="1.6976" y="0.7078" z="1.6976"/>
+        </leaf>
+    </node>
+    <node id="gmit-group-mi-chair-facilitator">
+        <!-- chair1.mesh is min-corner anchored; its 0.569 x 0.528 m centre is the seat centre. -->
+        <position x="-0.2845" y="0.0" z="-0.8640"/>
+        <orientation x="0.0" y="0.0" z="0.0"/>
+        <leaf id="gmit-group-mi-chair-facilitator-leaf" reference="object.chair">
+            <size x="0.569" y="0.943" z="0.528"/>
+        </leaf>
+    </node>
+    <node id="gmit-group-mi-chair-patient-a">
+        <position x="-1.2850" y="0.0" z="0.0470"/>
+        <orientation x="0.0" y="50.0" z="0.0"/>
+        <leaf id="gmit-group-mi-chair-patient-a-leaf" reference="object.chair">
+            <size x="0.569" y="0.943" z="0.528"/>
+        </leaf>
+    </node>
+    <node id="gmit-group-mi-chair-patient-b">
+        <position x="0.9190" y="0.0" z="-0.3880"/>
+        <orientation x="0.0" y="-50.0" z="0.0"/>
+        <leaf id="gmit-group-mi-chair-patient-b-leaf" reference="object.chair">
+            <size x="0.569" y="0.943" z="0.528"/>
+        </leaf>
+    </node>
+</node>

@@ -248,6 +248,8 @@ public final class SmokeProbe {
         }
     }
     private static void sampleFaces(int sequence, String speaker) throws Exception {
+        SeatedScene.checkHealthy();
+        SeatedScene.verifyPose();
         for (String actor : audio.keySet()) {
             Object frame = call(objects.get("gmit-"+actor+"-avatar"),"getCurrentFAPFrame");
             int jaw = (Integer)call(frame,"getValue",new Class<?>[]{int.class},3);
@@ -370,7 +372,12 @@ public final class SmokeProbe {
         try { run(args); status = 0; }
         catch (CancelledException cancelled) { log("CANCELLED " + cancelled.getMessage()); }
         catch (Throwable e) { log("FAILED " + e); e.printStackTrace(); }
-        finally { System.exit(status); }
+        finally {
+            SeatedScene.close();
+            try { SeatedScene.checkHealthy(); }
+            catch (Throwable e) { log("FAILED seated_cleanup " + e); status = 1; }
+            System.exit(status);
+        }
     }
     private static void run(String[] args) throws Exception {
         if (args.length == 2 && "--validate".equals(args[0])) {
@@ -397,7 +404,9 @@ public final class SmokeProbe {
         output = new File(args[1]);
         if (!output.isDirectory()) throw new IllegalArgumentException("Output directory must exist");
         Thread.setDefaultUncaughtExceptionHandler((t,e) -> { failure = e; log("thread_failed " + t.getName() + " " + e); });
-        Class.forName("greta.application.modular.Modular").getMethod("main", String[].class).invoke(null, (Object)new String[]{args[0]});
+        Class<?> entry = Class.forName("greta.application.modular.Modular");
+        log("entry class=" + entry.getName() + " from=" + entry.getProtectionDomain().getCodeSource().getLocation());
+        entry.getMethod("main", String[].class).invoke(null, (Object)new String[]{args[0]});
         long deadline = System.currentTimeMillis() + 60000;
         Object graph = null;
         while (graph == null && System.currentTimeMillis() < deadline) {
@@ -425,7 +434,18 @@ public final class SmokeProbe {
         }
         hideAutomaticReaderFrames();
         Caption caption = scenario == null ? null : new Caption(scenario.title);
-        Thread.sleep(2000); capture("00-scene");
+        if (scenario != null) SeatedScene.install(objects);
+        Thread.sleep(2000);
+        SeatedScene.verifyPose();
+        capture("00-scene");
+        if (scenario != null && Boolean.getBoolean("gmit.preview")) {
+            title("Seated group MI preview — no speech");
+            Thread.sleep(3000);
+            capture("01-seated-preview");
+            SeatedScene.checkHealthy();
+            log("COMPLETE mode=seated_preview speech=false");
+            return;
+        }
         for (int seconds=startDelay; seconds>0; seconds--) {
             if (caption != null) caption.checkCancelled();
             title((scenario == null ? "Synthetic F-A-B-F" : "Synthetic group MI") + " starts in " + seconds + " seconds"); Thread.sleep(1000);
@@ -460,6 +480,7 @@ public final class SmokeProbe {
             do {
                 if (caption != null) caption.checkCancelled();
                 if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
+                SeatedScene.checkHealthy();
                 assertAudioCounts(expected);
                 long remaining = holdUntil - System.currentTimeMillis();
                 if (remaining > 0) Thread.sleep(Math.min(100L, remaining));

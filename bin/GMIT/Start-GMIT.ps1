@@ -1,5 +1,5 @@
 param(
-    [switch]$Smoke, [switch]$GroupMI, [switch]$Original, [string]$JavaHome,
+    [switch]$Smoke, [switch]$GroupMI, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
     [ValidateRange(0,15)][int]$EndHoldSeconds = 0
@@ -9,6 +9,7 @@ if (($Smoke -and $GroupMI) -or ($Original -and ($Smoke -or $GroupMI))) {
     throw 'Choose only one of -Smoke, -GroupMI, or -Original.'
 }
 $automatic = $Smoke -or $GroupMI
+if ($Preview -and -not $GroupMI) { throw '-Preview requires -GroupMI and renders the seated scene without speech.' }
 if ($GroupMI) {
     # Give observers time to locate the avatars and read each caption.
     if (-not $PSBoundParameters.ContainsKey('StartDelaySeconds')) { $StartDelaySeconds = 10 }
@@ -63,7 +64,7 @@ Push-Location $bin
 $process = $null
 try {
     if ($automatic) {
-        $compileArgs = @('-encoding', 'UTF-8', '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'))
+        $compileArgs = @('-encoding', 'UTF-8', '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'))
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -81,6 +82,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $run 'compile.stderr.log'), $compileErr.Result)
         if ($compiler.ExitCode -ne 0 -or -not (Test-Path (Join-Path $run 'SmokeProbe.class'))) { throw ('SmokeProbe compilation failed (exit ' + $compiler.ExitCode + '); see ' + $run) }
         $arguments = @('-cp', ('"' + $run + ';Modular.jar"'), 'SmokeProbe', ('"' + $config + '"'), ('"' + $run + '"'), "$StartDelaySeconds", "$TurnGapSeconds", "$EndHoldSeconds")
+        if ($Preview) { $arguments = @('-Dgmit.preview=true') + $arguments }
         if ($GroupMI) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }
     Write-Output ('GMIT run directory: ' + $run)

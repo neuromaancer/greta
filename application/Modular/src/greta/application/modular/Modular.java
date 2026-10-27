@@ -45,6 +45,10 @@ public class Modular {
      * @param args the command line arguments
      */
     public static void main(final String[] args){
+        if (args.length == 1 && "--gmit-group-mi".equals(args[0])) {
+            System.exit(GMITLauncher.run());
+            return;
+        }
         Locale.setDefault(ModularSateIO.getSelectedLanguage());
         Style.setMapper(ModularSateIO.getStyleMapper());
         

@@ -2,7 +2,8 @@
 
 Updated 2026-10-27. P0 inspection and synthetic P1 acceptance are complete.
 The authored group MI extension adds a 13-turn conversation about reducing
-red meat; see [GROUP_MI.md](GROUP_MI.md) for its launch command and evidence.
+red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
+for launch commands, NetBeans settings, and evidence.
 The user subsequently authorized committing and pushing these development files
 to `feat/gmit-multiparty`. No live LLM generation, training, batch evaluation,
 GMIT edits, or runtime-repository commit is included.
@@ -115,9 +116,9 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete nine-file allowlist: the scene,
+`integrations/gmit/deployment.json` is the complete eleven-file allowlist: the scene,
 four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
-source, and local-output ignore file. Every source path maps to the identical
+source, seated-pose helper, room layout, and local-output ignore file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,
 deployment tooling and this document remain in the development checkout.
@@ -159,6 +160,8 @@ Set-Location 'C:\Users\alafate abulimiti\research\workspace\greta_2.1'
 & '.\bin\GMIT\Start-GMIT.ps1' -Smoke
 # Authored group MI conversation with captions and slower observation defaults.
 & '.\bin\GMIT\Start-GMIT.ps1' -GroupMI
+# Table, chairs, and seated-pose inspection without speech.
+& '.\bin\GMIT\Start-GMIT.ps1' -GroupMI -Preview
 # Slower observation replay: visible countdown, longer silent gaps and ending hold.
 & '.\bin\GMIT\Start-GMIT.ps1' -Smoke -StartDelaySeconds 10 -TurnGapSeconds 3 -EndHoldSeconds 10
 # Original unmodified two-character configuration.
@@ -187,22 +190,25 @@ may use another JDK. Set the Run properties as follows, adapting the local root:
 | Setting | Value on this machine |
 | --- | --- |
 | Main Class | `greta.application.modular.Modular` |
-| Arguments | `"Configurations\Greta\GMIT\GMIT - 3 characters - CereProc.xml"` |
+| Configuration | `GMIT Group MI` |
+| Arguments | `--gmit-group-mi` |
 | Working Directory | `C:\Users\alafate abulimiti\research\workspace\greta_2.1\bin` |
 | VM Options | `-Djava.library.path="C:\Users\alafate abulimiti\research\workspace\greta_2.1\bin\Player\Lib\External\Win64"` |
 
-Replace the stale developer-specific `run.jvmargs` path in the existing project settings locally;
-no NetBeans property file was changed as part of P1. Run Project (F6) loads the
-scene. Send the four numbered BML readers in order, waiting for each utterance
-to finish; automatic replay is provided separately by the launcher with `-Smoke`.
+The checked-in `nbproject/configs/gmit-group-mi.properties` overrides the default
+configuration's stale DLL path and points to the sibling complete runtime.
+Run Project (F6) starts the seated conversation automatically. Cancel with the
+caption's Stop button and allow the parent launcher to restore its scratch files.
+Full instructions and forced-stop recovery are in
+[GROUP_MI.md](GROUP_MI.md#run-modular-from-netbeans).
 
-These IDE settings follow the checked-in Modular entry point and project files,
-but a complete NetBeans build/run was not performed. IDE execution uses source
-build outputs and development dependencies, whereas P1 acceptance used the
-existing runtime JARs. Verify actual loaded artifacts before comparing results.
-The launcher currently rejects other Java processes, which can include NetBeans;
-close those before using the separate launcher. NetBeans execution also bypasses
-the launcher's scratch-file backup/restore, so preserve runtime files if using it.
+The previous XML argument
+`"Configurations\Greta\GMIT\GMIT - 3 characters - CereProc.xml"` still opens
+only the standing manual graph. It does not start group MI playback.
+IDE execution uses source build outputs and development dependencies; P1 used
+the installed runtime JARs. Verify actual loaded artifacts before comparing
+results. The separate PowerShell launcher rejects other Java processes,
+including NetBeans, so use the project entry while the IDE is open.
 
 ## Evidence and remaining work
 

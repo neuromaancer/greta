@@ -8,6 +8,8 @@
     "bin/Examples/GMIT/facilitator-close.xml",
     "bin/Examples/GMIT/group-mi-red-meat.xml",
     "bin/GMIT/SmokeProbe.java",
+    "bin/GMIT/SeatedScene.java",
+    "bin/Environments/GMIT/group-mi-room.xml",
     "bin/GMIT/Start-GMIT.ps1",
     "bin/GMIT/local/.gitignore"
   ]

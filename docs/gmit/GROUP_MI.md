@@ -5,6 +5,10 @@ facilitator and two fictional participants discuss reducing red meat. It is a
 repeatable engineering demonstration, not generated GMIT output or evidence of
 clinical effectiveness. No LLM, policy checkpoint, training, or evaluation is run.
 
+The group demo adds a table, three chairs, and a seated lower-body pose. The
+furniture uses the complete package's existing Office resources. The original
+standing four-line smoke configuration remains available with `-Smoke`.
+
 ## Start the scene
 
 From Windows PowerShell in the complete runtime package:
@@ -33,12 +37,89 @@ this runtime does not expose their frames to the probe for hiding.
 
 The facilitator and Sam share a voice configuration but retain independent
 speech, lip, audio, and animation chains. Their position and captions distinguish
-them. The scene, avatar resources, blinking configuration, and runtime JARs are
-the same as the accepted P1 setup.
+them. Avatar resources, blinking, and runtime JARs come from the accepted P1
+setup. Group playback adds its room and seated pose to the existing graph
+without replacing the Environment root.
 
 `-Smoke` still runs the original four-line F-A-B-F test. A launch without either
 switch still opens the scene for its original four manual readers. Choose one
 mode per launch; `-GroupMI`, `-Smoke`, and `-Original` cannot be combined.
+
+To inspect the seated layout without speech, use `-GroupMI -Preview`. This
+bounded preview saves scene captures locally and then exits.
+
+## Run Modular from NetBeans
+
+1. Open the development checkout's `greta/application/Modular` project. The
+   opt-in entry is source code in this project; the complete runtime package's
+   older Modular project does not contain it automatically.
+2. In Project Properties, choose **Windows 64-bit JDK 8** as the project's Java
+   Platform. Add the installed JDK through Java Platforms if it is missing.
+   The JDK used to run NetBeans itself is a separate setting.
+3. Select the **GMIT Group MI** run configuration. It is supplied by
+   `nbproject/configs/gmit-group-mi.properties`. Reopen the project if an already
+   open IDE has not noticed the new configuration.
+4. Check these settings under Project Properties > Run:
+
+| Setting | Value |
+| --- | --- |
+| Main Class | `greta.application.modular.Modular` |
+| Arguments | `--gmit-group-mi` |
+| Working Directory | The complete `greta_2.1/bin` directory |
+| VM Options | `-Djava.library.path="<complete-runtime-bin>/Player/Lib/External/Win64"` |
+
+The shared configuration defaults to a sibling runtime package via
+`${basedir}/../../../greta_2.1/bin`. Change Working Directory locally if yours
+is elsewhere. Its VM option derives the DLL directory from that setting and
+overrides the old developer-specific path in the default configuration.
+
+Right-click **Modular > Run**, or make Modular the main project and press **F6**.
+The opt-in launcher compiles the small demo
+helpers, launches the seated scene with captions, and plays the same 13-turn
+script. Use **Stop synthetic run** in the caption window to cancel. Let the
+launcher finish restoring its scratch files before another launch.
+
+The original XML argument still only opens the Modular graph and its individual
+readers. `group-mi-red-meat.xml` is a dialogue script, not a Modular graph to
+open directly. The `--gmit-group-mi` entry connects graph loading, room setup,
+posture, and scripted playback.
+
+The NetBeans bridge runs a child JVM with the IDE's actual application classpath
+plus the compiled demo helpers. It does not silently substitute runtime
+`Modular.jar` for the project's source build. The child exits before the parent
+restores `ModularSave.xml`, `fml_to_bml.xml`, the Ogre log, and the generated
+OpenGL plugin configuration. Logs and backups are written under
+`bin/GMIT/local/netbeans-group-mi-*/`; NetBeans Output prints the directory.
+
+Use the caption's Stop button instead of forcibly stopping the parent JVM in
+NetBeans. Force-killing the parent or closing the IDE can bypass its cleanup
+and leave the child running. After closing that child, the local
+`scratch-state.json` records which scratch files originally existed; the matching
+`.before` files are their originals. `scratch-restored.txt` indicates completed
+restoration. Do not restore an old snapshot over a later completed run.
+
+If the parent was force-killed, first close its remaining Greta child and any
+other Greta run. Then inspect the recorded state and recover that interrupted
+run in PowerShell, setting the two paths to the actual runtime and run directory:
+
+```powershell
+$runtimeBin = 'C:\path\to\greta_2.1\bin'
+$runDirectory = Join-Path $runtimeBin 'GMIT\local\netbeans-group-mi-TIMESTAMP'
+if (Test-Path (Join-Path $runDirectory 'scratch-restored.txt')) { throw 'Already restored; preserve later edits.' }
+$state = Get-Content (Join-Path $runDirectory 'scratch-state.json') -Raw | ConvertFrom-Json
+$allowed = @('ModularSave.xml', 'fml_to_bml.xml', 'Log/Ogre.log', 'Player/Lib/External/Win64/Plugins_OpenGL.cfg')
+foreach ($entry in $state.files) {
+    if ($entry.path -notin $allowed) { throw 'Unexpected scratch path.' }
+    if ($entry.existed -and -not (Test-Path (Join-Path $runDirectory (($entry.path -replace '/', '_') + '.before')))) { throw 'Missing original backup.' }
+}
+foreach ($entry in $state.files) {
+    $target = Join-Path $runtimeBin $entry.path
+    if ($entry.existed) {
+        Copy-Item -LiteralPath (Join-Path $runDirectory (($entry.path -replace '/', '_') + '.before')) -Destination $target -Force
+    } elseif (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target }
+}
+Set-Content (Join-Path $runDirectory 'scratch-restored.txt') 'Manually restored after the child was closed.'
+```
 
 ## Conversation
 
@@ -82,9 +163,22 @@ watchdog derives its limit from the turn count and observation delays. The
 maximum legal 16-turn configuration is bounded to 662 seconds, including startup
 and cleanup; the supplied 13-turn configuration defaults to a 530-second limit.
 
+`bin/Environments/GMIT/group-mi-room.xml` defines the furniture, camera, seat
+positions, and static joint angles. `SeatedScene.java` adds those room nodes
+without replacing the active Environment. It routes each actor's body frames
+through a lower-body overlay, preserving seated hips, knees, ankles, pelvis,
+and root placement while leaving speech, face, and arm channels unchanged.
+The probe checks every overlaid channel against actual avatar BAP frames during
+playback. Existing `object.table`, `object.chair`, and `object.floor` resources
+are reused; no meshes or weights are copied. Known furniture meshes ignore Leaf
+size metadata in this renderer, so layout offsets account for their actual bounds.
+This is a fixed seated pose, not a generated sitting transition or contact-aware
+hand/arm animation.
+
 ## Deployment and evidence
 
-The allowlist adds the scenario XML and updates the existing launcher and probe.
+The eleven-file allowlist includes the scenario, room XML, seated-pose helper,
+launcher, probe, original scene and BML examples, and local-output ignore file.
 Every listed file maps to the identical relative path in `greta_2.1`; the other
 P1 assets remain unchanged. Use `integrations/gmit/deploy.py` to preview and apply,
 as documented in [PROJECT.md](PROJECT.md#explicit-deployment-and-recovery).
@@ -98,7 +192,7 @@ establish sound heard from the physical speakers. Render-texture evidence and
 human visual/audible observation are reported separately. Listener gaze,
 head gestures, and live GMIT generation remain unverified.
 
-## Verified on 2026-10-27
+## Earlier standing demo acceptance, 2026-10-27
 
 The completed red-meat-reduction run is `group-mi-20261027-133156-510`, with
 launcher exit code 0. The user confirmed (translated from Chinese):
@@ -132,8 +226,8 @@ the four launcher-managed scratch files and three sampled pre-existing modified
 files also retained their pre-run hashes. Independent integration review covers
 the final diff, deployment mapping, and run evidence.
 
-To restore the previous P1 launcher/probe and remove the new scenario, run from
-the development checkout:
+After undoing all subsequent seated-scene deployments described below, restore
+the earlier P1 launcher/probe and remove the scenario from the development checkout:
 
 ```sh
 python3 integrations/gmit/deploy.py --runtime ../greta_2.1 --rollback ../greta_2.1/bin/GMIT/local/deploy-20261027T123142489436Z/receipt.json
@@ -144,3 +238,68 @@ during this extension. Stop-button interaction and forced watchdog expiry were
 not exercised in the completed run. This acceptance does not validate live GMIT,
 gaze/head/gesture behavior, an updated source-built Greta runtime, or MI quality
 against a clinical rating instrument.
+
+## Seated scene and source entry acceptance, 2026-10-27
+
+The completed seated run is `netbeans-group-mi-20261027-142420-750`, with parent
+exit code 0 and `scratch-restored.txt` present. The user confirmed during this
+run (translated from Chinese): “Seating, audio, lip movement, and captions are
+all normal.” The render capture independently shows three seated avatars at one
+table, with their chairs behind them and all three framed together.
+
+- All 13 authored turns completed in order with 13 matching event records and
+  exactly 13 audio callbacks: facilitator 5, patient A 4, patient B 4. Durations
+  were 5.739–8.561 seconds. Generated BML text matched all 13 source utterances.
+  No probe failure, duplicate callback, retry, or seated-cleanup failure occurred.
+- Root placement, yaw, pelvis, hips, knees, and ankles remained at the configured
+  pose during sampled speech frames. Inactive-mouth checks passed. Each actor
+  had 580 sampled face frames; maximum jaw values were 87, 72, and 80 for F, A,
+  and B, and eyelid ranges were 0–940 for all three. The run retained 13 WAVs and
+  581 render-texture PNGs locally.
+- Windows JDK 8 compiled the changed Modular entry and bridge against the
+  existing runtime dependency JARs. The run invoked that compiled source entry
+  with `--gmit-group-mi`; its logged code source is the development checkout's
+  ignored `bin/GMIT/local/netbeans-entry-check/classes/` directory. All 42 graph
+  modules still came from existing runtime JARs. The bridge's parent/child path
+  and normal cleanup were exercised; no production JAR was replaced.
+- The full NetBeans dependency build and an actual IDE Run/F6 click were not
+  exercised. The committed profile and property-loading path were inspected.
+  This source-entry check does not establish acceptance of a complete rebuilt
+  Greta dependency graph. Caption cancellation, forced IDE Stop, and timeout
+  recovery were not exercised in this run.
+- The original 66 runtime Git status entries remain; the only additional status
+  entry is the allowlisted `bin/Environments/GMIT/` directory. All four managed
+  scratch files and the three sampled pre-existing modified files retained their
+  pre-task SHA-256 values. All eleven deployed files match source and the final
+  receipt. Existing renderer/module warnings and Furhat diagnostics remain.
+
+The seated extension added four source files: `bin/GMIT/SeatedScene.java`,
+`bin/Environments/GMIT/group-mi-room.xml`,
+`application/Modular/src/greta/application/modular/GMITLauncher.java`, and
+`application/Modular/nbproject/configs/gmit-group-mi.properties`. Only the first
+two are runtime deployments; the NetBeans bridge and profile stay in the source
+checkout. The existing probe and launcher were updated in place through the
+allowlist. Static previews exposed and corrected root BAP masking and furniture
+alignment before this accepted audible run.
+
+The final seated deployment receipt is
+`deploy-20261027T132303028170Z/receipt.json`. To return the runtime to the previous
+standing group demo, roll back these four seated-extension receipts in reverse
+order from the development checkout (WSL):
+
+```sh
+for receipt in \
+  deploy-20261027T132303028170Z \
+  deploy-20261027T131943279989Z \
+  deploy-20261027T131630750260Z \
+  deploy-20261027T130450503607Z
+do
+  python3 integrations/gmit/deploy.py --runtime ../greta_2.1 \
+    --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
+done
+```
+
+The existing four-line standing smoke mode remains separate. Dynamic listener
+gaze, nods/gestures, authentic GMIT replay, and live model generation are still
+outside this acceptance. The independent integration reviewer checked the
+actual code changes, lifecycle handling, deployment mapping, and evidence.
