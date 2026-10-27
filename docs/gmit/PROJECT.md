@@ -1,6 +1,8 @@
 # GMIT in Greta
 
-Updated 2026-10-26. P0 inspection and synthetic P1 acceptance are complete.
+Updated 2026-10-27. P0 inspection and synthetic P1 acceptance are complete.
+The authored group MI extension adds a 13-turn conversation about reducing
+red meat; see [GROUP_MI.md](GROUP_MI.md) for its launch command and evidence.
 The user subsequently authorized committing and pushing these development files
 to `feat/gmit-multiparty`. No live LLM generation, training, batch evaluation,
 GMIT edits, or runtime-repository commit is included.
@@ -113,9 +115,10 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete allowlist: one new scene,
-four BML files, the PowerShell launcher, Java probe source, and local-output
-ignore file. Every source path maps to the identical relative runtime path.
+`integrations/gmit/deployment.json` is the complete nine-file allowlist: the scene,
+four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
+source, and local-output ignore file. Every source path maps to the identical
+relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,
 deployment tooling and this document remain in the development checkout.
 
@@ -128,7 +131,7 @@ python3 integrations/gmit/deploy.py --runtime ../greta_2.1 --apply
 
 Every apply saves original bytes and a SHA-256 receipt under
 `greta_2.1/bin/GMIT/local/deploy-*/receipt.json`, then verifies installed bytes.
-The final deployment for this session is
+The final original P1 deployment is
 `deploy-20261026T161508628383Z/receipt.json`. Earlier same-session receipts
 preserve the intermediate versions as well as the initial absence of each file.
 To undo one deployment:
@@ -154,6 +157,8 @@ Set-Location 'C:\Users\alafate abulimiti\research\workspace\greta_2.1'
 & '.\bin\GMIT\Start-GMIT.ps1'
 # Automatic, bounded synthetic test; closes its own process after completion.
 & '.\bin\GMIT\Start-GMIT.ps1' -Smoke
+# Authored group MI conversation with captions and slower observation defaults.
+& '.\bin\GMIT\Start-GMIT.ps1' -GroupMI
 # Slower observation replay: visible countdown, longer silent gaps and ending hold.
 & '.\bin\GMIT\Start-GMIT.ps1' -Smoke -StartDelaySeconds 10 -TurnGapSeconds 3 -EndHoldSeconds 10
 # Original unmodified two-character configuration.
@@ -162,9 +167,11 @@ Set-Location 'C:\Users\alafate abulimiti\research\workspace\greta_2.1'
 
 The manual launch waits until the application exits. The optional observation
 delays are bounded (start/end 0–15 seconds, turn gaps 1–5 seconds) and only apply
-to the synthetic probe. The smoke launch has a parameter-derived watchdog:
-120 seconds setup/cleanup plus start/end delays and four bounded turn budgets.
-Its legal maximum is 278 seconds; compilation has its own 30-second limit. Run directories
+to automatic synthetic playback. The smoke launch has a parameter-derived
+watchdog: 120 seconds setup/cleanup plus start/end delays and four bounded turn
+budgets. Its legal maximum remains 278 seconds. Group MI uses the validated
+scenario turn count, with a maximum of 662 seconds for 16 turns. Compilation has
+its own 30-second limit. Run directories
 contain stdout/stderr, compiled probe classes and any captured PNG/WAV files.
 The launcher restores ModularSave, the old FML conversion scratch file, Ogre
 log and generated OpenGL plugin config after its process exits. Initial failed

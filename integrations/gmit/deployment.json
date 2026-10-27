@@ -6,6 +6,7 @@
     "bin/Examples/GMIT/patient-a.xml",
     "bin/Examples/GMIT/patient-b.xml",
     "bin/Examples/GMIT/facilitator-close.xml",
+    "bin/Examples/GMIT/group-mi-red-meat.xml",
     "bin/GMIT/SmokeProbe.java",
     "bin/GMIT/Start-GMIT.ps1",
     "bin/GMIT/local/.gitignore"

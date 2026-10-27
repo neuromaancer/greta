@@ -1,11 +1,23 @@
+import java.awt.BorderLayout;
+import java.awt.Font;
 import java.awt.Frame;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.*;
 import javax.imageio.ImageIO;
-import javax.swing.SwingUtilities;
+import javax.swing.*;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 /** Bounded synthetic probe of the installed Modular objects; no model backend. */
 public final class SmokeProbe {
@@ -14,6 +26,92 @@ public final class SmokeProbe {
     private static File output;
     private static Object captureTarget;
     private static volatile Throwable failure;
+    private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
+
+    private static final class Turn {
+        final int sequence;
+        final String eventId;
+        final String actor;
+        final String stage;
+        final String act;
+        final String text;
+        Turn(int sequence, String eventId, String actor, String stage, String act, String text) {
+            this.sequence = sequence;
+            this.eventId = eventId;
+            this.actor = actor;
+            this.stage = stage;
+            this.act = act;
+            this.text = text;
+        }
+    }
+
+    private static final class Scenario {
+        final String sessionId;
+        final String title;
+        final List<Turn> turns;
+        Scenario(String sessionId, String title, List<Turn> turns) {
+            this.sessionId = sessionId;
+            this.title = title;
+            this.turns = turns;
+        }
+    }
+
+    private static final class Caption {
+        private final JFrame frame;
+        private final JTextArea text;
+        private volatile boolean cancelled;
+        Caption(final String title) throws Exception {
+            final JFrame[] holder = new JFrame[1];
+            final JTextArea[] area = new JTextArea[1];
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame value = new JFrame("GMIT | Synthetic Group MI");
+                value.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+                value.setLayout(new BorderLayout(8, 8));
+                JLabel label = new JLabel("Synthetic authored dialogue — " + title);
+                label.setFont(label.getFont().deriveFont(Font.BOLD, 16f));
+                label.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
+                JTextArea body = new JTextArea(8, 46);
+                body.setEditable(false);
+                body.setLineWrap(true);
+                body.setWrapStyleWord(true);
+                body.setFont(body.getFont().deriveFont(20f));
+                body.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+                JButton stop = new JButton("Stop synthetic run");
+                stop.addActionListener(event -> { cancelled = true; value.dispose(); });
+                value.add(label, BorderLayout.NORTH);
+                value.add(new JScrollPane(body), BorderLayout.CENTER);
+                value.add(stop, BorderLayout.SOUTH);
+                value.pack();
+                Frame player = (Frame)objects.get("gmit-player");
+                Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+                Rectangle playerBounds = player == null ? screen : player.getBounds();
+                int x = playerBounds.x + playerBounds.width + 12;
+                if (x + value.getWidth() > screen.x + screen.width) x = playerBounds.x - value.getWidth() - 12;
+                x = Math.max(screen.x, Math.min(x, screen.x + screen.width - value.getWidth()));
+                int y = Math.max(screen.y, Math.min(playerBounds.y, screen.y + screen.height - value.getHeight()));
+                value.setLocation(x, y);
+                value.setVisible(true);
+                holder[0] = value;
+                area[0] = body;
+            });
+            frame = holder[0];
+            text = area[0];
+        }
+        void show(final int index, final int total, final Turn turn) throws Exception {
+            final String speaker = speakerLabel(turn.actor);
+            SwingUtilities.invokeAndWait(() -> text.setText(
+                "Synthetic group MI\n"
+                + "Turn " + index + "/" + total + " | " + turn.stage + " | " + turn.act + "\n"
+                + speaker + "\n\n" + turn.text));
+        }
+        void close() throws Exception { SwingUtilities.invokeAndWait(() -> frame.dispose()); }
+        void checkCancelled() {
+            if (cancelled) throw new CancelledException("Synthetic group MI stopped by user");
+        }
+    }
+    private static final class CancelledException extends RuntimeException {
+        CancelledException(String message) { super(message); }
+    }
     private static Object call(Object o, String name, Class<?>[] types, Object... args) throws Exception {
         return o.getClass().getMethod(name, types).invoke(o, args);
     }
@@ -24,6 +122,130 @@ public final class SmokeProbe {
     private static void title(String value) throws Exception {
         final Frame player = (Frame)objects.get("gmit-player");
         SwingUtilities.invokeAndWait(() -> player.setTitle("GMIT | " + value));
+    }
+    private static String speakerLabel(String actor) {
+        if ("facilitator".equals(actor)) return "Facilitator (center)";
+        if ("patient-a".equals(actor)) return "Alex / patient A (left)";
+        if ("patient-b".equals(actor)) return "Sam / patient B (right)";
+        throw new IllegalArgumentException("Unsupported actor: " + actor);
+    }
+    private static String readerFor(String actor) {
+        if ("facilitator".equals(actor)) return "gmit-facilitator-open-reader";
+        if ("patient-a".equals(actor)) return "gmit-patient-a-reader";
+        if ("patient-b".equals(actor)) return "gmit-patient-b-reader";
+        throw new IllegalArgumentException("Unsupported actor: " + actor);
+    }
+    private static boolean isKnownActor(String actor) {
+        for (String known : ACTORS) if (known.equals(actor)) return true;
+        return false;
+    }
+    private static String requiredAttribute(Element element, String name) {
+        String value = element.getAttribute(name);
+        if (value == null || value.trim().isEmpty()) throw new IllegalArgumentException("Missing " + name + " on " + element.getTagName());
+        return value;
+    }
+    private static Element oneDirectChild(Element parent, String name) {
+        Element result = null;
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+            if (!name.equals(child.getNodeName())) throw new IllegalArgumentException("Unsupported child " + child.getNodeName() + " in " + parent.getTagName());
+            if (result != null) throw new IllegalArgumentException("Duplicate " + name + " in " + parent.getTagName());
+            result = (Element) child;
+        }
+        if (result == null) throw new IllegalArgumentException("Missing " + name + " in " + parent.getTagName());
+        return result;
+    }
+    private static String plainText(Element textElement) {
+        StringBuilder value = new StringBuilder();
+        NodeList children = textElement.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() == Node.TEXT_NODE || child.getNodeType() == Node.CDATA_SECTION_NODE) value.append(child.getNodeValue());
+            else if (child.getNodeType() == Node.ELEMENT_NODE) throw new IllegalArgumentException("Nested markup is not allowed in text");
+            else if (child.getNodeType() != Node.COMMENT_NODE) throw new IllegalArgumentException("Unsupported text node type");
+        }
+        return value.toString();
+    }
+    private static Scenario readScenario(File scenarioFile) throws Exception {
+        if (!scenarioFile.isFile()) throw new IllegalArgumentException("Scenario does not exist: " + scenarioFile);
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
+        try {
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        } catch (IllegalArgumentException unsupported) {
+            throw new IllegalStateException("Secure XML parser attributes are unavailable", unsupported);
+        }
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        builder.setEntityResolver((publicId, systemId) -> { throw new SAXException("External XML resolution is disabled"); });
+        Document document = builder.parse(scenarioFile);
+        Element root = document.getDocumentElement();
+        if (!"gmit-session".equals(root.getTagName())) throw new IllegalArgumentException("Expected gmit-session root");
+        if (!"1".equals(requiredAttribute(root, "schema_version"))) throw new IllegalArgumentException("Unsupported schema_version");
+        if (!"synthetic-authored".equals(requiredAttribute(root, "provenance"))) throw new IllegalArgumentException("Unsupported provenance");
+        if (!"scripted-f-a-b".equals(requiredAttribute(root, "floor_mode"))) throw new IllegalArgumentException("Unsupported floor_mode");
+        String sessionId = requiredAttribute(root, "session_id");
+        String title = requiredAttribute(root, "title");
+        List<Turn> turns = new ArrayList<>();
+        Set<String> eventIds = new HashSet<>();
+        int expectedSequence = 1;
+        NodeList children = root.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+            if (!"turn".equals(child.getNodeName())) throw new IllegalArgumentException("Unsupported element in scenario: " + child.getNodeName());
+            Element turn = (Element)child;
+            int sequence;
+            try { sequence = Integer.parseInt(requiredAttribute(turn, "sequence")); }
+            catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid turn sequence", invalid); }
+            if (sequence != expectedSequence++) throw new IllegalArgumentException("Turn sequences must be contiguous from 1");
+            String eventId = requiredAttribute(turn, "event_id");
+            if (!eventId.matches("[A-Za-z0-9][A-Za-z0-9._-]*") || !eventIds.add(eventId)) throw new IllegalArgumentException("Invalid or duplicate event_id: " + eventId);
+            String actor = requiredAttribute(turn, "actor_id");
+            if (!isKnownActor(actor)) throw new IllegalArgumentException("Unsupported actor_id: " + actor);
+            String stage = requiredAttribute(turn, "stage");
+            String act = requiredAttribute(turn, "act");
+            String text = plainText(oneDirectChild(turn, "text"));
+            if (text == null || text.trim().isEmpty() || text.length() > 300) throw new IllegalArgumentException("Turn text must contain 1..300 characters");
+            turns.add(new Turn(sequence, eventId, actor, stage, act, text));
+        }
+        if (turns.size() < 4 || turns.size() > 16) throw new IllegalArgumentException("Scenario must contain 4..16 turns");
+        if (turns.size() % 3 != 1) throw new IllegalArgumentException("scripted-f-a-b requires F,A,B cycles followed by a final facilitator turn");
+        for (int i = 0; i < turns.size(); i++) {
+            String expectedActor = ACTORS[i % ACTORS.length];
+            if (!expectedActor.equals(turns.get(i).actor)) throw new IllegalArgumentException("scripted-f-a-b actor order mismatch at turn " + (i + 1));
+        }
+        return new Scenario(sessionId, title, turns);
+    }
+    private static String escapeXml(String value) {
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;");
+    }
+    private static File writeBml(Turn turn) throws Exception {
+        File result = new File(output, String.format("synthetic-%02d-%s.xml", turn.sequence, turn.actor));
+        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            + "<bml>\n"
+            + "  <speech id=\"synthetic_" + turn.sequence + "\" start=\"0.0\" language=\"english\" voice=\"marytts\" type=\"SAPI4\" text=\"\">\n"
+            + "    <description level=\"1\" type=\"gretabml\"><reference>tmp/from-fml-apml.pho</reference></description>\n"
+            + "    <tm id=\"t1\"/>\n"
+            + "    " + escapeXml(turn.text) + "\n"
+            + "    <tm id=\"t2\"/>\n"
+            + "  </speech>\n"
+            + "</bml>\n";
+        java.nio.file.Files.write(result.toPath(), xml.getBytes("UTF-8"));
+        return result;
+    }
+    private static void assertAudioCounts(Map<String, Integer> expected) {
+        for (String actor : ACTORS) {
+            int actual = audio.get(actor).size();
+            if (actual != expected.get(actor)) throw new IllegalStateException("Unexpected audio count for " + actor + ": " + actual + " expected " + expected.get(actor));
+        }
     }
     private static void sampleFaces(int sequence, String speaker) throws Exception {
         for (String actor : audio.keySet()) {
@@ -88,18 +310,90 @@ public final class SmokeProbe {
         });
         add.invoke(performer, listener);
     }
+    private static void playTurn(int ordinal, int total, String actor, String readerId, File bml,
+                                 Map<String, Integer> expected, int turnGap, Caption caption, Turn scenarioTurn) throws Exception {
+        assertAudioCounts(expected);
+        if (caption != null) caption.checkCancelled();
+        if (caption != null) caption.show(ordinal, total, scenarioTurn);
+        title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
+        log("dispatch sequence=" + ordinal + " actor=" + actor + " reader=" + readerId + " file=" + bml.getName());
+        if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
+        call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
+        long until = System.currentTimeMillis() + 10000;
+        Map<String, Integer> scheduled = new HashMap<>(expected);
+        scheduled.put(actor, expected.get(actor) + 1);
+        while (audio.get(actor).size() == expected.get(actor) && System.currentTimeMillis() < until) {
+            if (caption != null) caption.checkCancelled();
+            if (failure != null) throw new IllegalStateException("Playback thread failed", failure);
+            for (String other : ACTORS) if (!other.equals(actor) && audio.get(other).size() != expected.get(other))
+                throw new IllegalStateException("Audio routed to wrong actor: " + other);
+            if (audio.get(actor).size() > scheduled.get(actor)) throw new IllegalStateException("Duplicate audio for " + actor);
+            Thread.sleep(100);
+        }
+        assertAudioCounts(scheduled);
+        Object a = audio.get(actor).get(expected.get(actor));
+        long duration = ((Number)call(a,"getDurationMillis")).longValue();
+        if (duration <= 0 || duration > 15000) throw new IllegalStateException("Unexpected synthetic audio duration: " + duration);
+        // End time is a schedule estimate, never a claim of sound reaching a speaker.
+        long end = ((Number)call(a,"getEndMillis")).longValue();
+        Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
+        long engineNow = ((Number)clock.invoke(null)).longValue();
+        long remaining = end-engineNow;
+        if (remaining < 0 || remaining > 15000) throw new IllegalStateException("Unexpected audio schedule");
+        long stop = System.currentTimeMillis()+remaining+turnGap*1000L+2000;
+        int frame = 0;
+        while (((Number)clock.invoke(null)).longValue()<end+turnGap*1000L) {
+            if (caption != null) caption.checkCancelled();
+            if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
+            if (failure != null) throw new IllegalStateException("Playback thread failed", failure);
+            assertAudioCounts(scheduled);
+            capture(String.format("%02d-%s-%03d", ordinal, actor, frame++)); sampleFaces(ordinal,actor); Thread.sleep(100);
+        }
+        assertAudioCounts(scheduled);
+        expected.put(actor, scheduled.get(actor));
+        log("schedule_elapsed sequence="+ordinal+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
+    }
+    private static void hideAutomaticReaderFrames() throws Exception {
+        for (String actor : ACTORS) {
+            Object reader = objects.get(readerFor(actor));
+            if (reader instanceof Frame) {
+                final Frame frame = (Frame)reader;
+                SwingUtilities.invokeAndWait(() -> frame.setVisible(false));
+                log("reader_frame hidden=" + readerFor(actor));
+            } else {
+                log("reader_frame unavailable=" + readerFor(actor));
+            }
+        }
+    }
     public static void main(String[] args) {
         int status = 1;
         try { run(args); status = 0; }
+        catch (CancelledException cancelled) { log("CANCELLED " + cancelled.getMessage()); }
         catch (Throwable e) { log("FAILED " + e); e.printStackTrace(); }
         finally { System.exit(status); }
     }
     private static void run(String[] args) throws Exception {
-        if (args.length != 2 && args.length != 5) throw new IllegalArgumentException("Usage: SmokeProbe config.xml output-directory [start-delay turn-gap end-hold]");
+        if (args.length == 2 && "--validate".equals(args[0])) {
+            Scenario scenario = readScenario(new File(args[1]));
+            StringBuilder order = new StringBuilder();
+            for (Turn turn : scenario.turns) {
+                if (order.length() > 0) order.append(',');
+                order.append(turn.actor);
+            }
+            log("VALID mode=synthetic_group_mi session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + order);
+            return;
+        }
+        if (args.length != 2 && args.length != 5 && args.length != 6) throw new IllegalArgumentException("Usage: SmokeProbe config.xml output-directory [start-delay turn-gap end-hold [scenario.xml]] or --validate scenario.xml");
         int startDelay = args.length == 5 ? Integer.parseInt(args[2]) : 0;
         int turnGap = args.length == 5 ? Integer.parseInt(args[3]) : 1;
         int endHold = args.length == 5 ? Integer.parseInt(args[4]) : 0;
+        if (args.length == 6) {
+            startDelay = Integer.parseInt(args[2]);
+            turnGap = Integer.parseInt(args[3]);
+            endHold = Integer.parseInt(args[4]);
+        }
         if (startDelay<0 || startDelay>15 || turnGap<1 || turnGap>5 || endHold<0 || endHold>15) throw new IllegalArgumentException("Observation delays out of bounds");
+        Scenario scenario = args.length == 6 ? readScenario(new File(args[5])) : null;
         output = new File(args[1]);
         if (!output.isDirectory()) throw new IllegalArgumentException("Output directory must exist");
         Thread.setDefaultUncaughtExceptionHandler((t,e) -> { failure = e; log("thread_failed " + t.getName() + " " + e); });
@@ -120,52 +414,60 @@ public final class SmokeProbe {
             String id = (String)call(m,"getId"); Object value = call(m,"getObject"); objects.put(id,value);
             log("loaded id=" + id + " class=" + value.getClass().getName() + " from=" + value.getClass().getProtectionDomain().getCodeSource().getLocation());
         }
-        String[] actors = {"facilitator","patient-a","patient-b"};
         Set<Object> managers = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (String actor : actors) {
+        for (String actor : ACTORS) {
             Object manager = objects.get("gmit-" + actor + "-manager");
             if (manager == null || !managers.add(manager)) throw new IllegalStateException("Missing or shared character manager");
-            log("blinking actor=" + actor + " enabled=" + call(objects.get("gmit-"+actor+"-face"),"isBlinking"));
+            boolean blinking = ((Boolean)call(objects.get("gmit-"+actor+"-face"),"isBlinking")).booleanValue();
+            log("blinking actor=" + actor + " enabled=" + blinking);
+            if (!blinking) throw new IllegalStateException("Blinking disabled for " + actor);
             observeAudio(actor);
         }
+        hideAutomaticReaderFrames();
+        Caption caption = scenario == null ? null : new Caption(scenario.title);
         Thread.sleep(2000); capture("00-scene");
         for (int seconds=startDelay; seconds>0; seconds--) {
-            title("Synthetic F-A-B-F starts in " + seconds + " seconds"); Thread.sleep(1000);
+            if (caption != null) caption.checkCancelled();
+            title((scenario == null ? "Synthetic F-A-B-F" : "Synthetic group MI") + " starts in " + seconds + " seconds"); Thread.sleep(1000);
         }
-        String[] turns = {"facilitator-open","patient-a","patient-b","facilitator-close"};
-        for (int i = 0; i < turns.length; i++) {
-            final String turn = turns[i]; String actor = turn.startsWith("facilitator") ? "facilitator" : turn;
-            Map<String,Integer> before = new HashMap<>(); for (String a : actors) before.put(a,audio.get(a).size());
-            Object reader = objects.get("gmit-" + turn + "-reader");
-            title("Turn " + (i+1) + "/4: " + actor);
-            log("dispatch sequence=" + (i+1) + " actor=" + actor + " file=" + turn + ".xml");
-            call(reader,"load",new Class<?>[]{String.class},"./Examples/GMIT/"+turn+".xml");
-            long until = System.currentTimeMillis()+10000;
-            while (audio.get(actor).size() == before.get(actor) && System.currentTimeMillis() < until) {
-                if (failure != null) throw new IllegalStateException("Playback thread failed",failure);
-                Thread.sleep(100);
+        Map<String,Integer> expected = new HashMap<>(); for (String actor : ACTORS) expected.put(actor, 0);
+        String scenarioOrder = null;
+        try {
+            if (scenario == null) {
+                String[] turns = {"facilitator-open","patient-a","patient-b","facilitator-close"};
+                for (int i = 0; i < turns.length; i++) {
+                    String turn = turns[i];
+                    String actor = turn.startsWith("facilitator") ? "facilitator" : turn;
+                    playTurn(i + 1, turns.length, actor, "gmit-" + turn + "-reader", new File("./Examples/GMIT/" + turn + ".xml"), expected, turnGap, null, null);
+                }
+                if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);
+                assertAudioCounts(expected);
+                title("Synthetic F-A-B-F finished");
+            } else {
+                StringBuilder order = new StringBuilder();
+                for (int i = 0; i < scenario.turns.size(); i++) {
+                    Turn turn = scenario.turns.get(i);
+                    if (order.length() > 0) order.append(',');
+                    order.append(turn.actor);
+                    playTurn(i + 1, scenario.turns.size(), turn.actor, readerFor(turn.actor), writeBml(turn), expected, turnGap, caption, turn);
+                }
+                scenarioOrder = order.toString();
+                if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);
+                assertAudioCounts(expected);
+                title("Synthetic group MI finished");
             }
-            if (audio.get(actor).size() != before.get(actor)+1) throw new IllegalStateException("Expected one synthesized audio for " + actor);
-            Object a = audio.get(actor).get(before.get(actor));
-            long duration = ((Number)call(a,"getDurationMillis")).longValue();
-            if (duration <= 0 || duration > 15000) throw new IllegalStateException("Unexpected synthetic audio duration: " + duration);
-            // End time is a schedule estimate, never a claim of sound reaching a speaker.
-            long end = ((Number)call(a,"getEndMillis")).longValue();
-            Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
-            long engineNow = ((Number)clock.invoke(null)).longValue();
-            long remaining = end-engineNow;
-            if (remaining < 0 || remaining > 15000) throw new IllegalStateException("Unexpected audio schedule");
-            long stop = System.currentTimeMillis()+remaining+turnGap*1000L+2000;
-            int frame = 0;
-            while (((Number)clock.invoke(null)).longValue()<end+turnGap*1000L) {
-                if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
-                capture(String.format("%02d-%s-%03d",i+1,actor,frame++)); sampleFaces(i+1,actor); Thread.sleep(100);
-            }
-            for (String other : actors) if (!other.equals(actor) && audio.get(other).size()!=before.get(other)) throw new IllegalStateException("Audio routed to wrong actor: " + other);
-            log("schedule_elapsed sequence="+(i+1)+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
+            long holdUntil = System.currentTimeMillis() + endHold * 1000L;
+            do {
+                if (caption != null) caption.checkCancelled();
+                if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
+                assertAudioCounts(expected);
+                long remaining = holdUntil - System.currentTimeMillis();
+                if (remaining > 0) Thread.sleep(Math.min(100L, remaining));
+            } while (System.currentTimeMillis() < holdUntil);
+            if (scenario == null) log("COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation");
+            else log("COMPLETE mode=synthetic_group_mi session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation");
+        } finally {
+            if (caption != null) caption.close();
         }
-        if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);
-        log("COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation");
-        title("Synthetic F-A-B-F finished"); Thread.sleep(endHold*1000L);
     }
 }

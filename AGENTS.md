@@ -93,7 +93,11 @@ The three-character entry point is
 `bin/Configurations/Greta/GMIT/GMIT - 3 characters - CereProc.xml`. Run
 `bin/GMIT/Start-GMIT.ps1` from the complete runtime package. A normal launch opens
 the scene for manual dispatch through the four numbered readers; `-Smoke` runs
-the bounded synthetic F -> A -> B -> F sequence. Commands and optional
+the bounded synthetic F -> A -> B -> F sequence. `-GroupMI` plays the authored
+13-turn red-meat-reduction group MI example, with captions and slower observation
+defaults. Its source is `bin/Examples/GMIT/group-mi-red-meat.xml`; stage and act
+labels are author annotations. See `docs/gmit/GROUP_MI.md` for its contract and
+evidence. Commands and optional
 observation delays are documented in `docs/gmit/PROJECT.md`. Do not describe this
 synthetic smoke test as a real GMIT simulation.
 
@@ -172,6 +176,13 @@ intentions/signals paths. Do not switch back without verification. Keep Planners
 available for later behavior extensions. The facilitator, patient-a, and
 patient-b map to LENA, EDDY, and LAURA at center, left, and right respectively.
 Preserve independent CharacterManagers and enabled blinking.
+
+The synthetic group MI extension uses the same scene and actor chains. Its
+bounded XML script generates one speech-only BML file per turn under the local
+run directory, reusing the existing actor readers. Keep the fixture explicitly
+synthetic and preserve its text, unique event IDs, and actor order. Parser-only
+validation must not start Modular or a model backend. This extension does not
+establish P2 gaze/gesture or authentic GMIT replay acceptance.
 
 The global IniManager loads `./Greta.ini` from the runtime working directory.
 The current graph does not need an additional Ini Manager UI node: its explicit

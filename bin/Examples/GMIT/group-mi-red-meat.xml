@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Public authored synthetic fixture. Stage and act values are author annotations;
+  this file contains no GMIT model output, private prompts, or real transcripts.
+-->
+<gmit-session schema_version="1" session_id="synthetic-group-mi-red-meat-v1" provenance="synthetic-authored" floor_mode="scripted-f-a-b" title="Group MI: reducing red meat">
+  <turn sequence="1" event_id="red-meat-v1-01" actor_id="facilitator" stage="engaging" act="open-question">
+    <text>Welcome, Alex and Sam. You can pass at any time. Would it be useful to explore reducing red meat in your own way?</text>
+  </turn>
+  <turn sequence="2" event_id="red-meat-v1-02" actor_id="patient-a" stage="engaging" act="ambivalence">
+    <text>I am curious, but red meat is familiar in our family dinners and everyone enjoys the taste.</text>
+  </turn>
+  <turn sequence="3" event_id="red-meat-v1-03" actor_id="patient-b" stage="engaging" act="peer-reflection">
+    <text>Alex, I hear that family routine matters. Convenience pulls me toward the same lunch choices most days.</text>
+  </turn>
+  <turn sequence="4" event_id="red-meat-v1-04" actor_id="facilitator" stage="focusing" act="reflection-open-question">
+    <text>You value familiar routines, while noticing reasons to try something different. What makes a change worth considering for each of you?</text>
+  </turn>
+  <turn sequence="5" event_id="red-meat-v1-05" actor_id="patient-a" stage="focusing" act="change-talk">
+    <text>I want more variety at dinner, and I would like to see whether a familiar meal can work with beans.</text>
+  </turn>
+  <turn sequence="6" event_id="red-meat-v1-06" actor_id="patient-b" stage="focusing" act="change-talk">
+    <text>I spend more than I want on quick lunches. Planning one different lunch could feel more intentional.</text>
+  </turn>
+  <turn sequence="7" event_id="red-meat-v1-07" actor_id="facilitator" stage="evoking" act="affirmation-open-question">
+    <text>You are naming your own reasons. What have you tried before, or what did you hear from the other person?</text>
+  </turn>
+  <turn sequence="8" event_id="red-meat-v1-08" actor_id="patient-a" stage="evoking" act="past-success">
+    <text>We once made bean chili without meat, and everyone liked it. Remembering that makes one dinner feel possible.</text>
+  </turn>
+  <turn sequence="9" event_id="red-meat-v1-09" actor_id="patient-b" stage="evoking" act="peer-support">
+    <text>Alex, that sounds like keeping what your family likes while changing one part. I could prepare lunch the night before.</text>
+  </turn>
+  <turn sequence="10" event_id="red-meat-v1-10" actor_id="facilitator" stage="planning" act="choice-question">
+    <text>Would either of you like to choose a small experiment, or would you rather keep exploring today?</text>
+  </turn>
+  <turn sequence="11" event_id="red-meat-v1-11" actor_id="patient-a" stage="planning" act="small-plan">
+    <text>I choose one dinner with beans instead of red meat this week. I can adapt it with my family.</text>
+  </turn>
+  <turn sequence="12" event_id="red-meat-v1-12" actor_id="patient-b" stage="planning" act="small-plan">
+    <text>I will plan one red-meat-free lunch this week and decide the option that suits my schedule.</text>
+  </turn>
+  <turn sequence="13" event_id="red-meat-v1-13" actor_id="facilitator" stage="planning" act="summary">
+    <text>Alex chose a bean dinner, and Sam chose a red-meat-free lunch. These are your choices, and we can revisit them.</text>
+  </turn>
+</gmit-session>
