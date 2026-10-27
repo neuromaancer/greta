@@ -1,0 +1,3 @@
+# Local imports, replay bundles, and service receipts are intentionally private.
+*
+!.gitignore

@@ -5,8 +5,12 @@ The authored group MI extension adds a 13-turn conversation about reducing
 red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
 for launch commands, NetBeans settings, and evidence.
 The user subsequently authorized committing and pushing these development files
-to `feat/gmit-multiparty`. No live LLM generation, training, batch evaluation,
-GMIT edits, or runtime-repository commit is included.
+to `feat/gmit-multiparty`. Initial P0/P1 work did not run an LLM. The later local
+Pure and offline-import extension is described in [REPLAY.md](REPLAY.md): one
+local-model episode produced seven utterances and replayed successfully; a
+complete imported episode preserved 61 utterances across 88 playback chunks.
+Training, batch evaluation, GMIT source edits, and runtime-repository commits
+remain outside this integration.
 
 ## Baseline and ownership
 
@@ -162,6 +166,8 @@ Set-Location 'C:\Users\alafate abulimiti\research\workspace\greta_2.1'
 & '.\bin\GMIT\Start-GMIT.ps1' -GroupMI
 # Table, chairs, and seated-pose inspection without speech.
 & '.\bin\GMIT\Start-GMIT.ps1' -GroupMI -Preview
+# Replay a converted transcript without a model service.
+& '.\bin\GMIT\Start-GMIT.ps1' -Replay 'C:\path\to\replay.xml'
 # Slower observation replay: visible countdown, longer silent gaps and ending hold.
 & '.\bin\GMIT\Start-GMIT.ps1' -Smoke -StartDelaySeconds 10 -TurnGapSeconds 3 -EndHoldSeconds 10
 # Original unmodified two-character configuration.
@@ -219,11 +225,13 @@ observation are separate evidence levels. The Windows Computer Use tool failed
 before connecting with `sandboxCwd is not a local file URI`; application-level
 instrumentation was used instead, without claiming desktop-tool observation.
 
-P2's smallest next task is verified gaze/head/gesture target binding and replay
-through a thin external adapter. Its event contract should retain
-`schema_version`, `session_id`, unique `event_id`, monotonic `sequence`, `actor_id`
-and unmodified text, with act/stage/source_turn when present. `_da_rows` is an
-internal, revision-bound interface; capture reset opening and every newly added
-row, including multiple rows sharing a turn and the closing facilitator. Reject
-failure placeholders. Preserve recurrent policy hidden/cell state. Select one
-patient pair and a bounded episode explicitly. No live runner was added in P1.
+Authentic GMIT generation followed by replay, and offline transcript import,
+are now accepted as described in [REPLAY.md](REPLAY.md). The external adapter
+preserves event identities, text, actors, order, and available annotations.
+Remaining P2 work is verified gaze/head/gesture target binding. Live per-step
+playback and RL execution remain unverified: the current Pure function returns
+a whole episode before playback. A later live adapter must capture the reset
+opening and every newly added row, including multiple rows sharing a source
+turn and the closing facilitator, while rejecting failure placeholders.
+`_da_rows` is an internal, revision-bound interface. Preserve recurrent policy
+hidden/cell state and select one patient pair and a bounded episode explicitly.

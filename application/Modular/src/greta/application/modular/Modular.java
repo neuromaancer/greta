@@ -49,6 +49,10 @@ public class Modular {
             System.exit(GMITLauncher.run());
             return;
         }
+        if ((args.length == 1 || args.length == 2) && "--gmit-replay".equals(args[0])) {
+            System.exit(GMITLauncher.runReplay(args.length == 2 ? args[1] : null));
+            return;
+        }
         Locale.setDefault(ModularSateIO.getSelectedLanguage());
         Style.setMapper(ModularSateIO.getStyleMapper());
         

@@ -1,14 +1,15 @@
 param(
-    [switch]$Smoke, [switch]$GroupMI, [switch]$Preview, [switch]$Original, [string]$JavaHome,
+    [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
     [ValidateRange(0,15)][int]$EndHoldSeconds = 0
 )
 $ErrorActionPreference = 'Stop'
-if (($Smoke -and $GroupMI) -or ($Original -and ($Smoke -or $GroupMI))) {
-    throw 'Choose only one of -Smoke, -GroupMI, or -Original.'
+$modes = @($Smoke, $GroupMI, [bool]$Replay, $Original) | Where-Object { $_ }
+if ($modes.Count -gt 1) {
+    throw 'Choose only one of -Smoke, -GroupMI, -Replay, or -Original.'
 }
-$automatic = $Smoke -or $GroupMI
+$automatic = $Smoke -or $GroupMI -or [bool]$Replay
 if ($Preview -and -not $GroupMI) { throw '-Preview requires -GroupMI and renders the seated scene without speech.' }
 if ($GroupMI) {
     # Give observers time to locate the avatars and read each caption.
@@ -16,6 +17,7 @@ if ($GroupMI) {
     if (-not $PSBoundParameters.ContainsKey('TurnGapSeconds')) { $TurnGapSeconds = 3 }
     if (-not $PSBoundParameters.ContainsKey('EndHoldSeconds')) { $EndHoldSeconds = 10 }
 }
+if ($Replay -and -not [IO.Path]::IsPathRooted($Replay)) { throw '-Replay must be an absolute scenario XML path.' }
 $bin = Split-Path $PSScriptRoot -Parent
 if (-not $JavaHome) {
     $jdk = Get-ChildItem 'C:\Program Files\Java' -Directory -Filter 'jdk1.8*' | Sort-Object Name -Descending | Select-Object -First 1
@@ -45,11 +47,19 @@ if ($GroupMI) {
     } finally { $reader.Dispose() }
     if ($turnCount -lt 4 -or $turnCount -gt 16) { throw 'The synthetic group MI scenario must contain 4 to 16 turns.' }
 }
+if ($Replay) {
+    $scenario = (Resolve-Path -LiteralPath $Replay -ErrorAction Stop).Path
+    $settings = New-Object System.Xml.XmlReaderSettings
+    $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit; $settings.XmlResolver = $null
+    $reader = [System.Xml.XmlReader]::Create($scenario, $settings)
+    try { $document = New-Object System.Xml.XmlDocument; $document.XmlResolver = $null; $document.Load($reader); $turnCount = $document.SelectNodes('/gmit-session/turn').Count } finally { $reader.Dispose() }
+    if ($turnCount -lt 1 -or $turnCount -gt 256) { throw 'A recorded replay scenario must contain 1 to 256 chunks.' }
+}
 # 120 seconds for graph/camera setup and cleanup, plus bounded per-turn
 # scheduling (10), audio (15), the chosen gap, and a 2-second capture margin.
 # Smoke remains capped at 278 seconds; a 16-turn scenario is capped at 662.
 $runTimeoutSeconds = 120 + $StartDelaySeconds + $EndHoldSeconds + $turnCount * (10 + 15 + $TurnGapSeconds + 2)
-$runPrefix = if ($GroupMI) { 'group-mi-' } else { 'run-' }
+$runPrefix = if ($GroupMI) { 'group-mi-' } elseif ($Replay) { 'replay-' } else { 'run-' }
 $run = Join-Path $PSScriptRoot ('local\' + $runPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $run | Out-Null
 # These existing runtime scratch files are restored even when startup/playback fails.
@@ -83,10 +93,11 @@ try {
         if ($compiler.ExitCode -ne 0 -or -not (Test-Path (Join-Path $run 'SmokeProbe.class'))) { throw ('SmokeProbe compilation failed (exit ' + $compiler.ExitCode + '); see ' + $run) }
         $arguments = @('-cp', ('"' + $run + ';Modular.jar"'), 'SmokeProbe', ('"' + $config + '"'), ('"' + $run + '"'), "$StartDelaySeconds", "$TurnGapSeconds", "$EndHoldSeconds")
         if ($Preview) { $arguments = @('-Dgmit.preview=true') + $arguments }
-        if ($GroupMI) { $arguments += ('"' + $scenario + '"') }
+        if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }
     Write-Output ('GMIT run directory: ' + $run)
     if ($GroupMI) { Write-Output ('Synthetic authored group MI demo: ' + $turnCount + ' turns; no live GMIT or model generation.') }
+    if ($Replay) { Write-Output ('Offline recorded replay: ' + $turnCount + ' chunks; no live GMIT or model generation.') }
     $process = Start-Process -FilePath $java -ArgumentList $arguments -WorkingDirectory $bin -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError (Join-Path $run 'stderr.log') -PassThru
     $null = $process.Handle
     if ($automatic) {

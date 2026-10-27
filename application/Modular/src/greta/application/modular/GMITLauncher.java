@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import javax.swing.JFileChooser;
 
 /** Opt-in NetBeans entry for the synthetic group MI demo; uses no model backend. */
 final class GMITLauncher {
@@ -24,7 +25,7 @@ final class GMITLauncher {
 
     static int run() {
         try {
-            launch();
+            launch(null);
             return 0;
         } catch (Exception error) {
             System.err.println("GMIT launch failed: " + error.getMessage());
@@ -33,7 +34,30 @@ final class GMITLauncher {
         }
     }
 
-    private static void launch() throws Exception {
+    static int runReplay(String replayArgument) {
+        try {
+            if (replayArgument == null) {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle("Select replay.xml");
+                if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) return 0;
+                replayArgument = chooser.getSelectedFile().getAbsolutePath();
+            }
+            File replayFile = new File(replayArgument);
+            if (!replayFile.isAbsolute()) throw new IllegalArgumentException("--gmit-replay requires an absolute replay XML file.");
+            Path replay = replayFile.getCanonicalFile().toPath();
+            if (!Files.isRegularFile(replay) || !replay.getFileName().toString().toLowerCase().endsWith(".xml")) {
+                throw new IllegalArgumentException("--gmit-replay requires an existing absolute replay XML file.");
+            }
+            launch(replay);
+            return 0;
+        } catch (Exception error) {
+            System.err.println("GMIT replay failed: " + error.getMessage());
+            error.printStackTrace();
+            return 1;
+        }
+    }
+
+    private static void launch(Path replay) throws Exception {
         if (!"1.8".equals(System.getProperty("java.specification.version"))
                 || !"64".equals(System.getProperty("sun.arch.data.model"))
                 || !System.getProperty("os.name", "").startsWith("Windows")) {
@@ -42,7 +66,7 @@ final class GMITLauncher {
         Path bin = new File(".").getCanonicalFile().toPath();
         Path helpers = bin.resolve("GMIT");
         Path scene = bin.resolve("Configurations/Greta/GMIT/GMIT - 3 characters - CereProc.xml");
-        Path scenario = bin.resolve("Examples/GMIT/group-mi-red-meat.xml");
+        Path scenario = replay == null ? bin.resolve("Examples/GMIT/group-mi-red-meat.xml") : replay;
         for (Path required : Arrays.asList(bin.resolve("Modular.jar"), scene, scenario,
                 helpers.resolve("SmokeProbe.java"), helpers.resolve("SeatedScene.java"),
                 bin.resolve("Environments/GMIT/group-mi-room.xml"))) {
@@ -61,10 +85,14 @@ final class GMITLauncher {
                 new SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(new Date()));
         Files.createDirectories(output.getParent());
         Files.createDirectory(output);
-        System.out.println("Synthetic red-meat-reduction group MI; output: " + output);
+        System.out.println((replay == null ? "Synthetic red-meat-reduction group MI" : "Offline recorded replay") + "; output: " + output);
         runOwned(Arrays.asList(javac.toString(), "-encoding", "UTF-8", "-source", "1.8", "-target", "1.8",
                 "-classpath", System.getProperty("java.class.path"), "-d", output.toString(), helpers.resolve("SmokeProbe.java").toString(),
                 helpers.resolve("SeatedScene.java").toString()), bin, output, "compile", 30);
+        if (replay != null) {
+            runOwned(Arrays.asList(java.toString(), "-cp", output + File.pathSeparator + System.getProperty("java.class.path"),
+                    "SmokeProbe", "--validate", scenario.toString()), bin, output, "validate", 30);
+        }
 
         Map<String, Boolean> originals = new LinkedHashMap<>();
         for (String name : SCRATCH) {
@@ -90,8 +118,9 @@ final class GMITLauncher {
             command.add("SmokeProbe");
             command.add(scene.toString());
             command.add(output.toString());
-            command.addAll(Arrays.asList("10", "3", "10", scenario.toString()));
-            runOwned(command, bin, output, "playback", 662);
+            command.addAll(Arrays.asList(replay == null ? "10" : "0", replay == null ? "3" : "1", replay == null ? "10" : "0", scenario.toString()));
+            int turnsUpperBound = replay == null ? 16 : 256;
+            runOwned(command, bin, output, "playback", 120 + turnsUpperBound * (10 + 15 + 5 + 2));
         } finally {
             // The child has exited before restoration; native rendering threads
             // cannot overwrite these originals after they have been restored.
@@ -104,7 +133,7 @@ final class GMITLauncher {
             }
             Files.write(output.resolve("scratch-restored.txt"), "Restored after child exit.\n".getBytes("UTF-8"));
         }
-        System.out.println("Synthetic group MI completed; runtime scratch files restored.");
+        System.out.println((replay == null ? "Synthetic group MI" : "Offline recorded replay") + " completed; runtime scratch files restored.");
     }
 
     private static void runOwned(List<String> command, Path bin, Path output, String stage, int seconds) throws Exception {

@@ -102,6 +102,13 @@ evidence. Commands and optional
 observation delays are documented in `docs/gmit/PROJECT.md`. Do not describe this
 synthetic smoke test as a real GMIT simulation.
 
+`-Replay <absolute replay.xml>` plays an imported or generated transcript in the
+same seated scene without calling a model. The NetBeans `GMIT Replay Import`
+profile uses `--gmit-replay [absolute replay.xml]`; omitting the path opens an XML
+file chooser. Convert source CSV/JSON/JSONL with `integrations.gmit.importer`
+first. Keep private bundles under ignored `integrations/gmit/local/` or
+`bin/GMIT/local/`, or outside the development checkout. See `docs/gmit/REPLAY.md`.
+
 The existing Ogre/CereProc path was verified with Windows 64-bit JDK 8. Do not
 blindly inherit system `JAVA_HOME` or the JDK used to run NetBeans itself. The
 launcher accepts an explicit `-JavaHome`. In NetBeans, open the development
@@ -249,6 +256,18 @@ Pure LLM.
 Existing scripts may iterate over multiple patient pairs. The integration runner
 must explicitly select one pair and one short episode. A smoke test must not
 accidentally start publication-scale batch evaluation or training.
+
+The Pure condition has a separate entry:
+`benchmark_llm.run_round_robin_episode`. It returns a complete episode's rows;
+do not describe it as a per-utterance live API or replace it with the RL wrapper.
+The external `integrations.gmit.run_pure` adapter imports this function from the
+private GMIT checkout and bounds one explicit pair/episode. Its local Ollama
+configuration is an engineering configuration, not an exact research replication.
+Preserve model identity, generation options, seeds, GMIT revision, and original
+rows in local receipts. Offline replay must work with the model server stopped.
+RL checkpoint selection requires existing development/validation evidence or an
+explicitly labelled provisional canonical choice; do not call an unavailable
+checkpoint validated or rank candidates using held-out outcomes.
 
 ## Output adaptation and execution
 

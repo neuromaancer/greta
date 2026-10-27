@@ -1,0 +1,2 @@
+# WSL launchers must retain Unix line endings after a Windows Git checkout.
+*.sh text eol=lf

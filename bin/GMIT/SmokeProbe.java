@@ -19,13 +19,14 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-/** Bounded synthetic probe of the installed Modular objects; no model backend. */
+/** Bounded local probe for authored scripts or offline transcript replay; no model backend. */
 public final class SmokeProbe {
     private static final Map<String, Object> objects = new LinkedHashMap<>();
     private static final Map<String, List<Object>> audio = new ConcurrentHashMap<>();
     private static File output;
     private static Object captureTarget;
     private static volatile Throwable failure;
+    private static String activeProvenance = "Synthetic authored dialogue";
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
 
     private static final class Turn {
@@ -35,24 +36,33 @@ public final class SmokeProbe {
         final String stage;
         final String act;
         final String text;
+        final String sourceEventId;
+        final String sourceTurn;
+        final int chunkIndex;
+        final int chunkCount;
         Turn(int sequence, String eventId, String actor, String stage, String act, String text) {
+            this(sequence, eventId, actor, stage, act, text, null, null, 1, 1);
+        }
+        Turn(int sequence, String eventId, String actor, String stage, String act, String text, String sourceEventId, String sourceTurn, int chunkIndex, int chunkCount) {
             this.sequence = sequence;
             this.eventId = eventId;
             this.actor = actor;
             this.stage = stage;
             this.act = act;
             this.text = text;
+            this.sourceEventId = sourceEventId; this.sourceTurn = sourceTurn;
+            this.chunkIndex = chunkIndex; this.chunkCount = chunkCount;
         }
     }
 
     private static final class Scenario {
         final String sessionId;
         final String title;
+        final String provenance;
+        final String condition;
         final List<Turn> turns;
-        Scenario(String sessionId, String title, List<Turn> turns) {
-            this.sessionId = sessionId;
-            this.title = title;
-            this.turns = turns;
+        Scenario(String sessionId, String title, String provenance, String condition, List<Turn> turns) {
+            this.sessionId = sessionId; this.title = title; this.provenance = provenance; this.condition = condition; this.turns = turns;
         }
     }
 
@@ -64,10 +74,10 @@ public final class SmokeProbe {
             final JFrame[] holder = new JFrame[1];
             final JTextArea[] area = new JTextArea[1];
             SwingUtilities.invokeAndWait(() -> {
-                JFrame value = new JFrame("GMIT | Synthetic Group MI");
+                JFrame value = new JFrame("GMIT | Group MI replay");
                 value.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
                 value.setLayout(new BorderLayout(8, 8));
-                JLabel label = new JLabel("Synthetic authored dialogue — " + title);
+                JLabel label = new JLabel(title);
                 label.setFont(label.getFont().deriveFont(Font.BOLD, 16f));
                 label.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
                 JTextArea body = new JTextArea(8, 46);
@@ -76,7 +86,7 @@ public final class SmokeProbe {
                 body.setWrapStyleWord(true);
                 body.setFont(body.getFont().deriveFont(20f));
                 body.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-                JButton stop = new JButton("Stop synthetic run");
+                JButton stop = new JButton("Stop run");
                 stop.addActionListener(event -> { cancelled = true; value.dispose(); });
                 value.add(label, BorderLayout.NORTH);
                 value.add(new JScrollPane(body), BorderLayout.CENTER);
@@ -97,16 +107,16 @@ public final class SmokeProbe {
             frame = holder[0];
             text = area[0];
         }
-        void show(final int index, final int total, final Turn turn) throws Exception {
+        void show(final int index, final int total, final Turn turn, String provenance) throws Exception {
             final String speaker = speakerLabel(turn.actor);
             SwingUtilities.invokeAndWait(() -> text.setText(
-                "Synthetic group MI\n"
+                provenance + "\n"
                 + "Turn " + index + "/" + total + " | " + turn.stage + " | " + turn.act + "\n"
                 + speaker + "\n\n" + turn.text));
         }
         void close() throws Exception { SwingUtilities.invokeAndWait(() -> frame.dispose()); }
         void checkCancelled() {
-            if (cancelled) throw new CancelledException("Synthetic group MI stopped by user");
+            if (cancelled) throw new CancelledException("Group MI run stopped by user");
         }
     }
     private static final class CancelledException extends RuntimeException {
@@ -168,6 +178,12 @@ public final class SmokeProbe {
         }
         return value.toString();
     }
+    private static String optionalAttribute(Element element, String name) { String value = element.getAttribute(name); return value == null || value.trim().isEmpty() ? null : value; }
+    private static int optionalPositive(Element element, String name, int fallback) {
+        String value = optionalAttribute(element, name); if (value == null) return fallback;
+        try { int parsed = Integer.parseInt(value); if (parsed < 1) throw new NumberFormatException(value); return parsed; }
+        catch (NumberFormatException bad) { throw new IllegalArgumentException("Invalid " + name, bad); }
+    }
     private static Scenario readScenario(File scenarioFile) throws Exception {
         if (!scenarioFile.isFile()) throw new IllegalArgumentException("Scenario does not exist: " + scenarioFile);
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -189,8 +205,13 @@ public final class SmokeProbe {
         Element root = document.getDocumentElement();
         if (!"gmit-session".equals(root.getTagName())) throw new IllegalArgumentException("Expected gmit-session root");
         if (!"1".equals(requiredAttribute(root, "schema_version"))) throw new IllegalArgumentException("Unsupported schema_version");
-        if (!"synthetic-authored".equals(requiredAttribute(root, "provenance"))) throw new IllegalArgumentException("Unsupported provenance");
-        if (!"scripted-f-a-b".equals(requiredAttribute(root, "floor_mode"))) throw new IllegalArgumentException("Unsupported floor_mode");
+        String provenance = requiredAttribute(root, "provenance");
+        String floorMode = requiredAttribute(root, "floor_mode");
+        boolean synthetic = "synthetic-authored".equals(provenance) && "scripted-f-a-b".equals(floorMode);
+        boolean replay = ("gmit-generated".equals(provenance) || "transcript-import".equals(provenance)) && "recorded".equals(floorMode);
+        if (!synthetic && !replay) throw new IllegalArgumentException("Unsupported provenance/floor_mode combination");
+        String condition = optionalAttribute(root, "condition");
+        if (condition != null && !"pure".equals(condition) && !"rl".equals(condition) && !"unknown".equals(condition)) throw new IllegalArgumentException("Unsupported condition");
         String sessionId = requiredAttribute(root, "session_id");
         String title = requiredAttribute(root, "title");
         List<Turn> turns = new ArrayList<>();
@@ -214,24 +235,42 @@ public final class SmokeProbe {
             String act = requiredAttribute(turn, "act");
             String text = plainText(oneDirectChild(turn, "text"));
             if (text == null || text.trim().isEmpty() || text.length() > 300) throw new IllegalArgumentException("Turn text must contain 1..300 characters");
-            turns.add(new Turn(sequence, eventId, actor, stage, act, text));
+            String sourceEventId = optionalAttribute(turn, "source_event_id");
+            String sourceTurn = optionalAttribute(turn, "source_turn");
+            int chunkIndex = optionalPositive(turn, "chunk_index", 1), chunkCount = optionalPositive(turn, "chunk_count", 1);
+            if (chunkIndex > chunkCount) throw new IllegalArgumentException("chunk_index exceeds chunk_count");
+            turns.add(new Turn(sequence, eventId, actor, stage, act, text, sourceEventId, sourceTurn, chunkIndex, chunkCount));
         }
-        if (turns.size() < 4 || turns.size() > 16) throw new IllegalArgumentException("Scenario must contain 4..16 turns");
-        if (turns.size() % 3 != 1) throw new IllegalArgumentException("scripted-f-a-b requires F,A,B cycles followed by a final facilitator turn");
-        for (int i = 0; i < turns.size(); i++) {
-            String expectedActor = ACTORS[i % ACTORS.length];
-            if (!expectedActor.equals(turns.get(i).actor)) throw new IllegalArgumentException("scripted-f-a-b actor order mismatch at turn " + (i + 1));
+        if (synthetic) {
+            if (turns.size() < 4 || turns.size() > 16) throw new IllegalArgumentException("Scenario must contain 4..16 turns");
+            if (turns.size() % 3 != 1) throw new IllegalArgumentException("scripted-f-a-b requires F,A,B cycles followed by a final facilitator turn");
+            for (int i = 0; i < turns.size(); i++) if (!ACTORS[i % ACTORS.length].equals(turns.get(i).actor)) throw new IllegalArgumentException("scripted-f-a-b actor order mismatch at turn " + (i + 1));
+        } else if (turns.isEmpty() || turns.size() > 256) {
+            throw new IllegalArgumentException("Recorded replay must contain 1..256 chunks");
+        } else {
+            for (int i = 0; i < turns.size(); i++) {
+                Turn turn = turns.get(i);
+                if (turn.chunkCount > 1) {
+                    if (turn.sourceEventId == null) throw new IllegalArgumentException("Chunked replay turn requires source_event_id");
+                    if (turn.chunkIndex == 1 && i + turn.chunkCount > turns.size()) throw new IllegalArgumentException("Incomplete chunk sequence");
+                    if (turn.chunkIndex > 1) {
+                        if (i == 0) throw new IllegalArgumentException("Replay cannot begin with a later chunk");
+                        Turn previous = turns.get(i - 1);
+                        if (!turn.actor.equals(previous.actor) || !turn.sourceEventId.equals(previous.sourceEventId) || turn.chunkIndex != previous.chunkIndex + 1 || turn.chunkCount != previous.chunkCount) throw new IllegalArgumentException("Replay chunks must be consecutive for one actor and source event");
+                    }
+                }
+            }
         }
-        return new Scenario(sessionId, title, turns);
+        return new Scenario(sessionId, title, provenance, condition, turns);
     }
     private static String escapeXml(String value) {
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;");
     }
     private static File writeBml(Turn turn) throws Exception {
-        File result = new File(output, String.format("synthetic-%02d-%s.xml", turn.sequence, turn.actor));
+        File result = new File(output, String.format("scenario-%03d-%s.xml", turn.sequence, turn.actor));
         String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             + "<bml>\n"
-            + "  <speech id=\"synthetic_" + turn.sequence + "\" start=\"0.0\" language=\"english\" voice=\"marytts\" type=\"SAPI4\" text=\"\">\n"
+            + "  <speech id=\"scenario_" + turn.sequence + "\" start=\"0.0\" language=\"english\" voice=\"marytts\" type=\"SAPI4\" text=\"\">\n"
             + "    <description level=\"1\" type=\"gretabml\"><reference>tmp/from-fml-apml.pho</reference></description>\n"
             + "    <tm id=\"t1\"/>\n"
             + "    " + escapeXml(turn.text) + "\n"
@@ -316,10 +355,10 @@ public final class SmokeProbe {
                                  Map<String, Integer> expected, int turnGap, Caption caption, Turn scenarioTurn) throws Exception {
         assertAudioCounts(expected);
         if (caption != null) caption.checkCancelled();
-        if (caption != null) caption.show(ordinal, total, scenarioTurn);
+        if (caption != null) caption.show(ordinal, total, scenarioTurn, activeProvenance);
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
         log("dispatch sequence=" + ordinal + " actor=" + actor + " reader=" + readerId + " file=" + bml.getName());
-        if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
+        if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " source_event_id=" + scenarioTurn.sourceEventId + " source_turn=" + scenarioTurn.sourceTurn + " chunk=" + scenarioTurn.chunkIndex + "/" + scenarioTurn.chunkCount + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
         call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
         long until = System.currentTimeMillis() + 10000;
         Map<String, Integer> scheduled = new HashMap<>(expected);
@@ -335,7 +374,7 @@ public final class SmokeProbe {
         assertAudioCounts(scheduled);
         Object a = audio.get(actor).get(expected.get(actor));
         long duration = ((Number)call(a,"getDurationMillis")).longValue();
-        if (duration <= 0 || duration > 15000) throw new IllegalStateException("Unexpected synthetic audio duration: " + duration);
+        if (duration <= 0 || duration > 15000) throw new IllegalStateException("Unexpected generated audio duration: " + duration);
         // End time is a schedule estimate, never a claim of sound reaching a speaker.
         long end = ((Number)call(a,"getEndMillis")).longValue();
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
@@ -349,7 +388,9 @@ public final class SmokeProbe {
             if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
             if (failure != null) throw new IllegalStateException("Playback thread failed", failure);
             assertAudioCounts(scheduled);
-            capture(String.format("%02d-%s-%03d", ordinal, actor, frame++)); sampleFaces(ordinal,actor); Thread.sleep(100);
+            if ("Synthetic authored dialogue".equals(activeProvenance)) capture(String.format("%02d-%s-%03d", ordinal, actor, frame++));
+            else if ((ordinal <= 3 || ordinal == total || ordinal % 25 == 0) && frame++ == 0) capture(String.format("%03d-%s", ordinal, actor));
+            sampleFaces(ordinal,actor); Thread.sleep(100);
         }
         assertAudioCounts(scheduled);
         expected.put(actor, scheduled.get(actor));
@@ -387,7 +428,7 @@ public final class SmokeProbe {
                 if (order.length() > 0) order.append(',');
                 order.append(turn.actor);
             }
-            log("VALID mode=synthetic_group_mi session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + order);
+            log("VALID mode=" + ("synthetic-authored".equals(scenario.provenance) ? "synthetic_group_mi" : "recorded_replay") + " provenance=" + scenario.provenance + " session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + order);
             return;
         }
         if (args.length != 2 && args.length != 5 && args.length != 6) throw new IllegalArgumentException("Usage: SmokeProbe config.xml output-directory [start-delay turn-gap end-hold [scenario.xml]] or --validate scenario.xml");
@@ -401,6 +442,7 @@ public final class SmokeProbe {
         }
         if (startDelay<0 || startDelay>15 || turnGap<1 || turnGap>5 || endHold<0 || endHold>15) throw new IllegalArgumentException("Observation delays out of bounds");
         Scenario scenario = args.length == 6 ? readScenario(new File(args[5])) : null;
+        if (scenario != null) activeProvenance = "synthetic-authored".equals(scenario.provenance) ? "Synthetic authored dialogue" : "Recorded offline replay — " + scenario.provenance + (scenario.condition == null ? "" : " / " + scenario.condition);
         output = new File(args[1]);
         if (!output.isDirectory()) throw new IllegalArgumentException("Output directory must exist");
         Thread.setDefaultUncaughtExceptionHandler((t,e) -> { failure = e; log("thread_failed " + t.getName() + " " + e); });
@@ -448,7 +490,8 @@ public final class SmokeProbe {
         }
         for (int seconds=startDelay; seconds>0; seconds--) {
             if (caption != null) caption.checkCancelled();
-            title((scenario == null ? "Synthetic F-A-B-F" : "Synthetic group MI") + " starts in " + seconds + " seconds"); Thread.sleep(1000);
+            String runLabel = scenario == null ? "Synthetic F-A-B-F" : activeProvenance;
+            title(runLabel + " starts in " + seconds + " seconds"); Thread.sleep(1000);
         }
         Map<String,Integer> expected = new HashMap<>(); for (String actor : ACTORS) expected.put(actor, 0);
         String scenarioOrder = null;
@@ -474,7 +517,7 @@ public final class SmokeProbe {
                 scenarioOrder = order.toString();
                 if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);
                 assertAudioCounts(expected);
-                title("Synthetic group MI finished");
+                title(activeProvenance + " finished");
             }
             long holdUntil = System.currentTimeMillis() + endHold * 1000L;
             do {
@@ -486,7 +529,7 @@ public final class SmokeProbe {
                 if (remaining > 0) Thread.sleep(Math.min(100L, remaining));
             } while (System.currentTimeMillis() < holdUntil);
             if (scenario == null) log("COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation");
-            else log("COMPLETE mode=synthetic_group_mi session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation");
+            else log("COMPLETE mode=" + ("synthetic-authored".equals(scenario.provenance) ? "synthetic_group_mi" : "recorded_replay") + " provenance=" + scenario.provenance + " session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation");
         } finally {
             if (caption != null) caption.close();
         }
