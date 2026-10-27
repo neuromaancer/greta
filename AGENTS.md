@@ -198,6 +198,12 @@ later extensions have separate evidence records.
 `bin/GMIT/SeatedScene.java` adds only the room nodes from
 `bin/Environments/GMIT/group-mi-room.xml` and overlays the seated legs and
 configurable tabletop arm BAP pose.
+Optional `arm-joint` children on each `seat` supply explicit arm/hand/finger BAP
+angles in degrees. Keep the allowlist limited to arms and hands; root, spine,
+neck, face, and eyelid channels are not valid overrides. The fixed clasp pose
+owns the arm channels while enabled and is calibrated for these three avatars,
+not a general hand-contact or collision solver. `-DisableTabletopArms` also
+disables the finger overrides. Inspect close-up renders after hand-pose edits.
 Do not replace the active Environment root, double-apply seat coordinates to
 both the Environment parent and BAP root, or let speech reset the seated legs.
 Keep face/lip/blink channels independent. Preview furniture placement and actual

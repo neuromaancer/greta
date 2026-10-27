@@ -4,9 +4,13 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -19,6 +23,7 @@ import org.xml.sax.SAXException;
 public final class SeatedScene {
     private static final String ROOM_FILE = "./Environments/GMIT/group-mi-room.xml";
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
+    private static final Set<String> ARM_JOINTS = armJointNames();
     private static final boolean ARMS = Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true"));
     private static final List<PoseController> CONTROLLERS = new ArrayList<PoseController>();
     private static volatile boolean installed;
@@ -107,7 +112,7 @@ public final class SeatedScene {
                     number(seat, "l_elbow_twisting_degrees", 0), number(seat, "r_elbow_twisting_degrees", 0),
                     number(seat, "l_wrist_flexion_degrees", 0), number(seat, "r_wrist_flexion_degrees", 0),
                     number(seat, "l_wrist_pivot_degrees", 0), number(seat, "r_wrist_pivot_degrees", 0),
-                    number(seat, "l_wrist_twisting_degrees", 0), number(seat, "r_wrist_twisting_degrees", 0)));
+                    number(seat, "l_wrist_twisting_degrees", 0), number(seat, "r_wrist_twisting_degrees", 0), readArmOverrides(seat)));
         }
         for (String actor : ACTORS) if (!poses.containsKey(actor)) throw new IllegalArgumentException("Room seat is missing actor: " + actor);
         return new RoomLayout(root, poses, number(root, "camera_x", 0), number(root, "camera_y", 1.5),
@@ -117,6 +122,41 @@ public final class SeatedScene {
     private static boolean isKnownActor(String actor) {
         for (String known : ACTORS) if (known.equals(actor)) return true;
         return false;
+    }
+
+    private static Set<String> armJointNames() {
+        Set<String> names = new HashSet<String>();
+        for (String side : new String[] {"l", "r"}) {
+            Collections.addAll(names, side + "_shoulder_flexion", side + "_shoulder_abduct", side + "_shoulder_twisting",
+                    side + "_elbow_flexion", side + "_elbow_twisting", side + "_wrist_flexion", side + "_wrist_pivot", side + "_wrist_twisting",
+                    side + "_thumb1_flexion", side + "_thumb1_pivot", side + "_thumb1_twisting", side + "_thumb2_flexion", side + "_thumb3_flexion");
+            for (String finger : new String[] {"index", "middle", "ring", "pinky"}) {
+                Collections.addAll(names, side + "_" + finger + "0_flexion", side + "_" + finger + "1_flexion",
+                        side + "_" + finger + "1_pivot", side + "_" + finger + "1_twisting", side + "_" + finger + "2_flexion", side + "_" + finger + "3_flexion");
+            }
+        }
+        return Collections.unmodifiableSet(names);
+    }
+
+    private static Map<String, Double> readArmOverrides(Element seat) {
+        Map<String, Double> overrides = new LinkedHashMap<String, Double>();
+        NodeList children = seat.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+            if (!"arm-joint".equals(child.getNodeName())) throw new IllegalArgumentException("Unsupported seat child " + child.getNodeName());
+            Element joint = (Element)child;
+            String name = joint.getAttribute("name");
+            if (!ARM_JOINTS.contains(name) || overrides.containsKey(name)) throw new IllegalArgumentException("Invalid or duplicate arm-joint name: " + name);
+            String rawDegrees = joint.getAttribute("degrees");
+            if (rawDegrees == null || rawDegrees.trim().isEmpty()) throw new IllegalArgumentException("arm-joint degrees is required");
+            double degrees;
+            try { degrees = Double.parseDouble(rawDegrees); }
+            catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid arm-joint degrees: " + rawDegrees, invalid); }
+            if (Double.isNaN(degrees) || Double.isInfinite(degrees) || Math.abs(degrees) > 180.0) throw new IllegalArgumentException("Out-of-range arm-joint degrees: " + rawDegrees);
+            overrides.put(name, degrees);
+        }
+        return overrides;
     }
 
     private static void addRoom(Object environment, Element room) throws Exception {
@@ -216,13 +256,16 @@ public final class SeatedScene {
     private static final class PoseSpec {
         private final double x, z, yaw, vertical, hip, knee, ankle, sacroiliac, lShoulderFlexion, rShoulderFlexion, lShoulderAbduct, rShoulderAbduct, lElbowFlexion, rElbowFlexion, lElbowTwisting, rElbowTwisting, lWristFlexion, rWristFlexion, lWristPivot, rWristPivot;
         private final double lWristTwisting, rWristTwisting;
-        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting) {
+        private final Map<String, Double> armOverrides;
+        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting, Map<String, Double> armOverrides) {
             this.x = x; this.z = z; this.yaw = yaw; this.vertical = vertical;
             this.hip = hip; this.knee = knee; this.ankle = ankle; this.sacroiliac = sacroiliac;
             this.lShoulderFlexion = lShoulderFlexion; this.rShoulderFlexion = rShoulderFlexion; this.lShoulderAbduct = lShoulderAbduct; this.rShoulderAbduct = rShoulderAbduct;
             this.lElbowFlexion = lElbowFlexion; this.rElbowFlexion = rElbowFlexion; this.lElbowTwisting = lElbowTwisting; this.rElbowTwisting = rElbowTwisting; this.lWristFlexion = lWristFlexion; this.rWristFlexion = rWristFlexion; this.lWristPivot = lWristPivot; this.rWristPivot = rWristPivot;
             this.lWristTwisting = lWristTwisting; this.rWristTwisting = rWristTwisting;
+            this.armOverrides = Collections.unmodifiableMap(new LinkedHashMap<String, Double>(armOverrides));
         }
+        double arm(String name, double fallback) { Double value = armOverrides.get(name); return value == null ? fallback : value.doubleValue(); }
     }
 
     /** Redirects body frames through a seated lower-body and tabletop-arm overlay without touching face or lip channels. */
@@ -294,6 +337,7 @@ public final class SeatedScene {
             setDegrees(frame, typeClass, "l_wrist_flexion", pose.lWristFlexion); setDegrees(frame, typeClass, "r_wrist_flexion", pose.rWristFlexion);
             setDegrees(frame, typeClass, "l_wrist_pivot", pose.lWristPivot); setDegrees(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
             setDegrees(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting); setDegrees(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
+            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) setDegrees(frame, typeClass, override.getKey(), override.getValue().doubleValue());
             }
             setValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
             setValue(frame, typeClass, "HumanoidRoot_tr_vertical", (int)Math.round(pose.vertical));
@@ -312,16 +356,12 @@ public final class SeatedScene {
             assertMask(frame, typeClass, "l_ankle_flexion"); assertDegrees(frame, typeClass, "l_ankle_flexion", pose.ankle);
             assertMask(frame, typeClass, "r_ankle_flexion"); assertDegrees(frame, typeClass, "r_ankle_flexion", pose.ankle);
             if (ARMS) {
-            assertMask(frame, typeClass, "l_shoulder_flexion"); assertDegrees(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion);
-            assertMask(frame, typeClass, "r_shoulder_flexion"); assertDegrees(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
-            assertMask(frame, typeClass, "l_elbow_flexion"); assertDegrees(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion);
-            assertMask(frame, typeClass, "r_elbow_flexion"); assertDegrees(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
-            assertMask(frame, typeClass, "l_elbow_twisting"); assertDegrees(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting);
-            assertMask(frame, typeClass, "r_elbow_twisting"); assertDegrees(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
-            assertMask(frame, typeClass, "l_wrist_pivot"); assertDegrees(frame, typeClass, "l_wrist_pivot", pose.lWristPivot);
-            assertMask(frame, typeClass, "r_wrist_pivot"); assertDegrees(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
-            assertMask(frame, typeClass, "l_wrist_twisting"); assertDegrees(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting);
-            assertMask(frame, typeClass, "r_wrist_twisting"); assertDegrees(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
+            assertArm(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion); assertArm(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
+            assertArm(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion); assertArm(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
+            assertArm(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting); assertArm(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
+            assertArm(frame, typeClass, "l_wrist_pivot", pose.lWristPivot); assertArm(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
+            assertArm(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting); assertArm(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
+            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) assertArm(frame, typeClass, override.getKey(), override.getValue().doubleValue());
             }
             assertMask(frame, typeClass, "HumanoidRoot_rt_body_turn"); assertDegrees(frame, typeClass, "HumanoidRoot_rt_body_turn", pose.yaw);
             assertValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
@@ -334,6 +374,7 @@ public final class SeatedScene {
         private static void setDegrees(Object frame, Class<?> types, String name, double value) throws Exception { SeatedScene.invoke(frame, "setDegreeValue", type(types, name), value); }
         private static void setValue(Object frame, Class<?> types, String name, int value) throws Exception { SeatedScene.invoke(frame, "setMaskAndValue", type(types, name), true, value); }
         private void assertMask(Object frame, Class<?> types, String name) throws Exception { if (!((Boolean)SeatedScene.invoke(frame, "getMask", type(types, name))).booleanValue()) throw changed(name + ".mask", false, true); }
+        private void assertArm(Object frame, Class<?> types, String name, double fallback) throws Exception { assertMask(frame, types, name); assertDegrees(frame, types, name, pose.arm(name, fallback)); }
         private void assertDegrees(Object frame, Class<?> types, String name, double expected) throws Exception { double actual = ((Number)SeatedScene.invoke(frame, "getDegreeValue", type(types, name))).doubleValue(); if (Math.abs(actual - expected) > 0.5) throw changed(name, actual, expected); }
         private void assertValue(Object frame, Class<?> types, String name, int expected) throws Exception { int actual = ((Number)SeatedScene.invoke(frame, "getValue", type(types, name))).intValue(); if (actual != expected) throw changed(name, actual, expected); }
         private IllegalStateException changed(String channel, Object actual, Object expected) { return new IllegalStateException("GMIT seated pose changed actor=" + actor + " channel=" + channel + " actual=" + actual + " expected=" + expected); }

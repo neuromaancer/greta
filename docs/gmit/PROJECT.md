@@ -4,6 +4,8 @@ Updated 2026-10-27. P0 inspection and synthetic P1 acceptance are complete.
 The authored group MI extension adds a 13-turn conversation about reducing
 red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
 for launch commands, NetBeans settings, and evidence.
+The seated scene also supports per-avatar clasped-hand poses and listener gaze;
+their separate calibration and acceptance records are in the same document.
 The user subsequently authorized committing and pushing these development files
 to `feat/gmit-multiparty`. Initial P0/P1 work did not run an LLM. The later local
 Pure and offline-import extension is described in [REPLAY.md](REPLAY.md): one

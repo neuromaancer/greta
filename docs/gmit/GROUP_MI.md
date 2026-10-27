@@ -389,3 +389,78 @@ do
     --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
 done
 ```
+
+## Clasped hands, 2026-10-27
+
+The seated scene now uses individually calibrated shoulder, elbow, and wrist
+angles to bring both hands together, with explicit finger rotations for a
+clasp. The existing room XML contains the pose for LENA, EDDY, and LAURA; no
+mesh, skeleton, voice, or production JAR is replaced. Launch commands and the
+NetBeans Group MI / Replay profiles are unchanged.
+
+Each `seat` can contain optional entries such as:
+
+```xml
+<arm-joint name="l_index1_flexion" degrees="-25.0"/>
+```
+
+The name must be an allowed arm, wrist, or finger BAP. Duplicate names,
+unsupported child elements, missing/invalid degrees, nonfinite values, and
+angles outside [-180, 180] are rejected before room installation. These entries
+override the seat's arm attributes and persist across speech body frames.
+`-DisableTabletopArms` (or `-Dgmit.pose.arms=false` in NetBeans) disables the
+whole arm/hand overlay while preserving seated legs. Enabled fixed poses own
+the arm/finger channels; blending arbitrary concurrent arm gestures is not
+established. Face, lips, blinking, and listener gaze retain their own channels.
+
+This is an authored pose calibrated against the rendered Autodesk skeletons,
+not a physical hand-contact, inverse-kinematics, or collision system during
+playback. Local calibration helpers and close-up captures remain ignored.
+Eight Java 8 parser cases passed without starting Modular: one valid finger
+entry, plus rejection of root/head joints, duplicate names, NaN, Infinity,
+181-degree values, and an unsupported seat child.
+Two additional JVM checks used the runtime's actual `BAPFrame` class without
+starting the GUI. Enabled arm overrides changed the test finger to 45 degrees;
+disabled overrides preserved its incoming 12-degree value. Both retained the
+seated hip pose, and the incoming head channel was unchanged.
+
+The final silent close-ups are in the local run
+`hand-calibration-20261027-174348-435`. Compared with the earlier spread palms,
+they show interleaved fingers and folded thumbs for all three actors. The hands
+were lowered after earlier close-ups exposed a visible gap. Lowest finger-bone
+centers are 0.7118-0.7127 m above the scene floor, near the existing tabletop at
+approximately 0.7078 m. Bone centers are not skin surfaces or collision probes;
+the close-ups provide the visual evidence, and sub-millimeter contact and unseen
+mesh intersections are not established.
+
+Normal replay `replay-20261027-174503-355` then exited 0 with seven dispatches,
+seven audio callbacks, seven elapsed schedule intervals, and 21 gaze-state
+checks. The F-A-B-F-A-B-F order was preserved; all three actors supplied 696
+face samples each. Seated-arm/finger persistence and inactive-mouth checks
+passed. Seven WAVs and nine render captures remain local. All seven saved
+runtime baseline hashes and its 67 pre-existing Git status entries were
+unchanged after cleanup. Independent review accepted the hand-pose evidence.
+The user subsequently reported remaining chair/pelvis intersection and asked
+for more natural speaker gaze and a 200 ms gaze/speech transition offset.
+Those are separate follow-up requirements; this is not overall seated-scene
+user acceptance.
+
+Only two runtime paths changed in this task, each deployed to the same relative
+path under `greta_2.1`: `bin/GMIT/SeatedScene.java` and
+`bin/Environments/GMIT/group-mi-room.xml`. All twelve allowlisted files match
+source and the final receipt `deploy-20261027T164310616923Z/receipt.json`.
+No new public file or deployment mapping was added. To restore the pre-clasp
+pose and helper, roll back all four task receipts in reverse order; stop if a
+subsequent edit is detected:
+
+```sh
+for receipt in \
+  deploy-20261027T164310616923Z \
+  deploy-20261027T164124444295Z \
+  deploy-20261027T163012096741Z \
+  deploy-20261027T162103001737Z
+do
+  python3 integrations/gmit/deploy.py --runtime ../greta_2.1 \
+    --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
+done
+```
