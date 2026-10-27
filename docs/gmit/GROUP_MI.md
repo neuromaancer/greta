@@ -464,3 +464,79 @@ do
     --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
 done
 ```
+
+## Chair fit and conversational gaze, 2026-10-27
+
+Side views confirmed that the original cushions intersected the avatars' pelvis.
+Each chair node now uses vertical scale 0.88 around its existing floor origin.
+The table, avatar roots, seated limbs, and calibrated clasped hands retain their
+positions. Room nodes accept optional positive scale components up to 4;
+missing components default to 1. Six no-GUI scale checks passed (one valid and
+five invalid inputs). Side captures in `seat-calibration-20261027-175916-499`
+show the earlier deep cushion intersection removed. This remains a visual fit,
+with no physical collision, cushion compression, or exact weight-bearing contact
+claim.
+
+The user's requested timing is **new speech starts, then listeners begin turning
+200 ms later**. Replay uses the emitted Audio's Greta Timer timestamps, rather
+than the BML dispatch time. Listener motion starts on the first 25 fps frame at
+or after that deadline (200-239 ms for an on-time schedule). Existing turn gaps
+keep the preceding utterance finished before the new transition. Schedule logs
+report the actual frame-derived offset; they do not measure acoustic device
+latency or when sound reaches the listener.
+
+The speaker initially looks at one of the two listeners. For utterances lasting
+at least 3.5 seconds, the speaker changes to the other listener at the midpoint,
+using a 28-frame (1.12-second) smooth transition. This is a change within the
+same utterance. Shorter utterances retain one peer target. Both listeners keep
+looking at the active speaker throughout; the speaker's midpoint switch does
+not redirect them. The first peer alternates across playback turns.
+The probe captures both speaker phases and checks their actual neck/eye values.
+
+Gaze-only neck and eye frames cover the bounded speech interval (at most 15
+seconds). This prevents earlier queued speech animation from restoring old gaze
+after the initial transition. Incoming live frames use the same gaze timeline.
+An actual `APFrameList` fixture verified gaze replacement at frame 100, beyond
+the former 24-frame transition, while preserving jaw, eyelid, arm, finger,
+seated hip, and root values. The normal replay keeps checking those channels.
+
+Final replay `replay-20261027-181009-897` exited 0 after the original seven
+utterances in F-A-B-F-A-B-F order. It recorded seven audio callbacks, seven
+elapsed schedule intervals, seven within-utterance speaker switches, and 28
+gaze-phase verifications (both speaker targets and both listeners per turn).
+Listener schedule offsets were 230, 202, 210, 207, 206, 216, and 232 ms after
+audio start. Each actor supplied 688 face samples; inactive-mouth, blinking,
+seated-limb, and clasp-persistence checks passed. Sixteen PNGs include each
+speaker's first and second target; seven WAVs remain local. No new model call
+or GMIT source change was involved.
+
+The user confirmed the final replay (translated from Chinese): "I can see the
+switch within the same utterance; everything else is normal." This supplies
+human acceptance of the visible gaze switch and the other requested appearance
+and audiovisual checks. It does not measure a physical 200 ms acoustic delay.
+Java 8 compiled and executed the deployed helpers. The NetBeans launch profiles
+use the same helpers and remain unchanged; direct NetBeans F6 interaction was
+not repeated during this task.
+
+All twelve deployed files match source and the final receipt. All seven saved
+runtime baseline hashes and its 67 pre-existing Git status entries remained
+unchanged. Four existing paths changed at the same relative runtime locations:
+`bin/GMIT/SeatedScene.java`, `bin/GMIT/ListenerGaze.java`,
+`bin/GMIT/SmokeProbe.java`, and `bin/Environments/GMIT/group-mi-room.xml`.
+No new public file or deployment mapping was added. To restore the accepted
+clasp-only revision, roll back these four follow-up receipts in reverse order:
+
+```sh
+for receipt in \
+  deploy-20261027T170926531064Z \
+  deploy-20261027T170118677665Z \
+  deploy-20261027T165716931179Z \
+  deploy-20261027T165426856134Z
+do
+  python3 integrations/gmit/deploy.py --runtime ../greta_2.1 \
+    --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
+done
+```
+
+Stop rollback on any subsequent-edit warning. To also undo the clasped hands,
+continue with the four earlier receipts listed in the preceding section.

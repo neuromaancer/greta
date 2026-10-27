@@ -150,6 +150,7 @@
         <!-- chair1.mesh is min-corner anchored; its 0.569 x 0.528 m centre is the seat centre. -->
         <position x="-0.2845" y="0.0" z="-1.0440"/>
         <orientation x="0.0" y="0.0" z="0.0"/>
+        <scale x="1.0" y="0.88" z="1.0"/>
         <leaf id="gmit-group-mi-chair-facilitator-leaf" reference="object.chair">
             <size x="0.569" y="0.943" z="0.528"/>
         </leaf>
@@ -157,6 +158,7 @@
     <node id="gmit-group-mi-chair-patient-a">
         <position x="-1.4050" y="0.0" z="0.0470"/>
         <orientation x="0.0" y="50.0" z="0.0"/>
+        <scale x="1.0" y="0.88" z="1.0"/>
         <leaf id="gmit-group-mi-chair-patient-a-leaf" reference="object.chair">
             <size x="0.569" y="0.943" z="0.528"/>
         </leaf>
@@ -164,6 +166,7 @@
     <node id="gmit-group-mi-chair-patient-b">
         <position x="1.0390" y="0.0" z="-0.3880"/>
         <orientation x="0.0" y="-50.0" z="0.0"/>
+        <scale x="1.0" y="0.88" z="1.0"/>
         <leaf id="gmit-group-mi-chair-patient-b-leaf" reference="object.chair">
             <size x="0.569" y="0.943" z="0.528"/>
         </leaf>

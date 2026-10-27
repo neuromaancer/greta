@@ -358,7 +358,6 @@ public final class SmokeProbe {
         if (caption != null) caption.checkCancelled();
         if (caption != null) caption.show(ordinal, total, scenarioTurn, activeProvenance);
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
-        ListenerGaze.focus(actor);
         log("dispatch sequence=" + ordinal + " actor=" + actor + " reader=" + readerId + " file=" + bml.getName());
         if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " source_event_id=" + scenarioTurn.sourceEventId + " source_turn=" + scenarioTurn.sourceTurn + " chunk=" + scenarioTurn.chunkIndex + "/" + scenarioTurn.chunkCount + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
         call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
@@ -377,14 +376,18 @@ public final class SmokeProbe {
         Object a = audio.get(actor).get(expected.get(actor));
         long duration = ((Number)call(a,"getDurationMillis")).longValue();
         if (duration <= 0 || duration > 15000) throw new IllegalStateException("Unexpected generated audio duration: " + duration);
-        // End time is a schedule estimate, never a claim of sound reaching a speaker.
+        // Greta Timer-domain schedule bounds, not a claim of physical speaker playback.
+        long start = ((Number)call(a,"getTimeMillis")).longValue();
         long end = ((Number)call(a,"getEndMillis")).longValue();
+        String gazePeer = gazePeer(actor, ordinal);
+        ListenerGaze.scheduleSpeech(actor, gazePeer, start, end);
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         long engineNow = ((Number)clock.invoke(null)).longValue();
         long remaining = end-engineNow;
         if (remaining < 0 || remaining > 15000) throw new IllegalStateException("Unexpected audio schedule");
         long stop = System.currentTimeMillis()+remaining+turnGap*1000L+2000;
         int frame = 0;
+        boolean capturedSpeakerShift = false;
         while (((Number)clock.invoke(null)).longValue()<end+turnGap*1000L) {
             if (caption != null) caption.checkCancelled();
             if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
@@ -393,11 +396,23 @@ public final class SmokeProbe {
             if ("Synthetic authored dialogue".equals(activeProvenance)) capture(String.format("%02d-%s-%03d", ordinal, actor, frame++));
             else if ((ordinal <= 3 || ordinal == total || ordinal % 25 == 0) && frame++ == 0) capture(String.format("%03d-%s", ordinal, actor));
             if (scenarioTurn != null && frame == 12) capture(String.format("gaze-%03d-%s", ordinal, actor));
+            if (scenarioTurn != null && duration >= 3500 && !capturedSpeakerShift
+                    && ((Number)clock.invoke(null)).longValue() >= start + duration / 2 + 1300) {
+                capture(String.format("speaker-shift-%03d-%s", ordinal, actor));
+                capturedSpeakerShift = true;
+            }
             sampleFaces(ordinal,actor); Thread.sleep(100);
         }
         assertAudioCounts(scheduled);
         expected.put(actor, scheduled.get(actor));
         log("schedule_elapsed sequence="+ordinal+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
+    }
+
+    /** Alternate valid listener targets across successive speaking turns. */
+    private static String gazePeer(String speaker, int ordinal) {
+        List<String> peers = new ArrayList<>();
+        for (String actor : ACTORS) if (!actor.equals(speaker)) peers.add(actor);
+        return peers.get((ordinal - 1) % peers.size());
     }
     private static void hideAutomaticReaderFrames() throws Exception {
         for (String actor : ACTORS) {

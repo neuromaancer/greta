@@ -198,6 +198,9 @@ later extensions have separate evidence records.
 `bin/GMIT/SeatedScene.java` adds only the room nodes from
 `bin/Environments/GMIT/group-mi-room.xml` and overlays the seated legs and
 configurable tabletop arm BAP pose.
+Room `node` elements accept optional positive `scale` values. Chair-only vertical
+scaling lowers the cushion while retaining the floor origin; do not move seated
+avatars to repair chair contact because that also moves the calibrated hands.
 Optional `arm-joint` children on each `seat` supply explicit arm/hand/finger BAP
 angles in degrees. Keep the allowlist limited to arms and hands; root, spine,
 neck, face, and eyelid channels are not valid overrides. The fixed clasp pose
@@ -219,6 +222,14 @@ drop-in replacement for this seated configuration. Keep the head transition
 bounded and change only cervical yaw/pitch and the four eye FAP channels after
 LipBlender. Preserve jaw, lips, eyelids, seated limbs, and root placement.
 Idle listeners need finite gaze-only frames because they may emit no body frames.
+During replay, the speaker looks at a valid peer; for utterances of at least
+3.5 seconds, the speaker switches to the other peer at the midpoint with a
+28-frame smooth transition. Schedule listener motion from the actual Greta Audio
+start timestamp plus 200 ms, rounded up to the next 25 fps frame. The configured
+turn gap keeps the preceding utterance finished before the new transition.
+Do not schedule from BML dispatch: TTS latency is variable. Preserve the gaze
+timeline for prequeued speech frames and cover the bounded audio interval with
+neck/eye-only masks so older queued frames cannot restore the previous gaze.
 Gaze owns the cervical channels while enabled; independent nod/gesture blending
 is not established. Use `-DisableListenerGaze` or `-DisableTabletopArms` for
 isolation. The NetBeans child forwards `gmit.gaze.enabled`, `gmit.gaze.head`,

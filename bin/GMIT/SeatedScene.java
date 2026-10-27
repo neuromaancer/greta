@@ -179,6 +179,8 @@ public final class SeatedScene {
         if (position != null) invoke(target, "setCoordinates", number(position, "x", 0), number(position, "y", 0), number(position, "z", 0));
         Element orientation = child(source, "orientation");
         if (orientation != null) invoke(target, "setOrientation", radians(number(orientation, "x", 0)), radians(number(orientation, "y", 0)), radians(number(orientation, "z", 0)));
+        Element scale = child(source, "scale");
+        if (scale != null) invoke(target, "setScale", scale(scale, "x"), scale(scale, "y"), scale(scale, "z"));
         NodeList children = source.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
@@ -218,6 +220,12 @@ public final class SeatedScene {
         double parsed = Double.parseDouble(value);
         if (Double.isNaN(parsed) || Double.isInfinite(parsed)) throw new IllegalArgumentException("Invalid numeric room value: " + name);
         return parsed;
+    }
+
+    private static double scale(Element source, String name) {
+        double value = number(source, name, 1);
+        if (value <= 0 || value > 4) throw new IllegalArgumentException("Room scale " + name + " must be >0 and <=4");
+        return value;
     }
 
     private static double radians(double degrees) { return Math.toRadians(degrees); }
