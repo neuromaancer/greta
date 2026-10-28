@@ -166,10 +166,18 @@ The ordinary PowerShell launcher run `replay-20261028-151510-016` exited 0:
 seven dispatches, seven audio callbacks, seven elapsed schedule checks, seven
 speaker midpoint switches, and 28 gaze phase checks. Listener transitions were
 scheduled 211-239 ms after the audio start. Seven WAVs and sixteen render
-captures remain local. Ollama was stopped before playback. These checks and the
-rendered scene do not establish human audible/visual acceptance or measured
-physical audio timing; human confirmation of this RL run is still pending.
-Actual NetBeans F6 interaction was not repeated.
+captures remain local. Ollama was stopped before playback. These software
+checks do not measure physical audio timing. Actual NetBeans F6 interaction
+was not repeated.
+
+At the user's request, the same saved seven-utterance RL episode was replayed
+with a 15-second opening delay in `replay-20261028-152627-939`. The ordinary
+launcher exited 0 with seven dispatches, audio callbacks, and elapsed schedule
+checks. No new model generation occurred. The user confirmed the voices, lip
+movement, captions, actor correspondence, hand posture, and gaze were all normal
+(translated from Chinese: "Everything is normal"). This supplies human
+audiovisual acceptance for the RL replay path, separately from its software
+scheduling checks.
 
 Fifteen focused adapter/bundle tests passed, and independent integration review
 found no remaining contract or publication blocker. No runtime JAR, avatar,
