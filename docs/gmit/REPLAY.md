@@ -156,11 +156,17 @@ audio completion; record human observation separately.
 Read-only inspection found documented previously evaluated policy candidates,
 but no suitable development-validation ranking establishing a best checkpoint.
 A provisional canonical candidate and its recorded checksum are retained in a
-private local selection receipt. The checkpoint itself is absent locally, so
-its bytes, strict loading, and behavior have not been validated on this machine.
+private local selection receipt. The checkpoint was initially absent locally,
+so its bytes, strict loading, and behavior were not validated during the Pure
+extension.
 Held-out results were not used to rank candidates. Using it with the selected
 4B language model would require a new compatibility/behavior check; no RL
 execution or training was performed for this extension.
+
+The subsequent local RL integration copies the selected checkpoint and matching
+encoder from cluster, checks their hashes, strictly loads the CPU policy, and
+generates one bounded episode with the existing scheduler. See [RL.md](RL.md)
+for its separate environment, startup commands, and current acceptance evidence.
 
 ## Verified Pure generation and replay, 2026-10-27
 

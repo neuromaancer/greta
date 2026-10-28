@@ -302,6 +302,17 @@ RL checkpoint selection requires existing development/validation evidence or an
 explicitly labelled provisional canonical choice; do not call an unavailable
 checkpoint validated or rank candidates using held-out outcomes.
 
+`integrations.gmit.run_rl` runs one explicit patient pair through the existing
+round-robin evaluation wrapper and Tianshou Collector. Keep recurrent policy
+state, strict checkpoint loading, CPU policy/encoder inference, and the pinned
+compatible GMIT revision. Its `--preflight-only` path must not contact Ollama or
+reset/generate an episode. The separate `venv-rl` environment preserves Pure's
+dependencies. Keep downloaded policy weights, encoder files, source rows, and
+copy receipts private. See `docs/gmit/RL.md` for setup and startup.
+All generated replay XML uses `floor_mode="recorded"`; the RL generation
+scheduler belongs in receipt `generation_floor_mode`, not the playback field.
+Validate new adapter output with `SmokeProbe --validate` before GUI playback.
+
 ## Output adaptation and execution
 
 The minimum event contract includes `schema_version`, `session_id`, an independent

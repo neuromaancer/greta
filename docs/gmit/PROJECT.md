@@ -1,6 +1,6 @@
 # GMIT in Greta
 
-Updated 2026-10-27. P0 inspection and synthetic P1 acceptance are complete.
+Updated 2026-10-28. P0 inspection and synthetic P1 acceptance are complete.
 The authored group MI extension adds a 13-turn conversation about reducing
 red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
 for launch commands, NetBeans settings, and evidence.
@@ -11,6 +11,9 @@ to `feat/gmit-multiparty`. Initial P0/P1 work did not run an LLM. The later loca
 Pure and offline-import extension is described in [REPLAY.md](REPLAY.md): one
 local-model episode produced seven utterances and replayed successfully; a
 complete imported episode preserved 61 utterances across 88 playback chunks.
+The local RL extension in [RL.md](RL.md) adds a separate CPU inference
+environment, a hash-verified private checkpoint and encoder, and one bounded
+episode through the existing round-robin evaluation wrapper.
 Training, batch evaluation, GMIT source edits, and runtime-repository commits
 remain outside this integration.
 
@@ -234,8 +237,7 @@ preserves event identities, text, actors, order, and available annotations.
 Listener gaze now passes three-speaker render and channel checks while replaying
 speech, with tabletop hand posture preserved; see the later posture/gaze record
 in [GROUP_MI.md](GROUP_MI.md). Independent nod/gesture composition remains P2 work.
-Live per-step
-playback and RL execution remain unverified: the current Pure function returns
+Live per-step playback remains unverified: the Pure and RL adapters return
 a whole episode before playback. A later live adapter must capture the reset
 opening and every newly added row, including multiple rows sharing a source
 turn and the closing facilitator, while rejecting failure placeholders.

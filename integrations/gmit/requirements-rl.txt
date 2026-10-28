@@ -1,0 +1,14 @@
+# Local CPU inference environment, separate from the verified Pure environment.
+# Install torch from the official CPU wheel index before installing this file.
+torch==2.10.0
+tianshou==2.0.0
+sentence-transformers==5.1.2
+transformers==4.57.3
+numpy==2.2.6
+numba==0.61.2
+gymnasium==1.2.1
+openai==2.14.0
+ollama==0.6.3
+python-dotenv==1.2.4
+tenacity==9.2.1
+rich==15.0.0
