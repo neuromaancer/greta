@@ -636,9 +636,11 @@ seven intended-actor audio callbacks, seven elapsed schedule checks, seven
 speaker gaze switches, and 28 gaze verifications. Pose persistence and inactive
 mouth checks passed. Listener transition delays were 211-239 ms; sixteen PNGs
 and seven WAVs remain local. This used the existing transcript without a model
-call. Final human confirmation of the refined pose is pending; callbacks and
-renders do not establish physical audio/lip observation. All six runtime scratch
-hashes and the pre-existing runtime Git status were preserved.
+call. On 2026-10-30, the user confirmed that the refined posture (lower elbows,
+narrower elbow spacing, and hands moved forward) was suitable. This records
+human posture acceptance; audio/lip evidence for this final replay remains
+programmatic. All six runtime scratch hashes and the pre-existing runtime Git
+status were preserved.
 
 Deployment changed only `bin/Environments/GMIT/group-mi-room.xml` at the same
 relative path in `greta_2.1`. The other eleven allowlisted files retained their
