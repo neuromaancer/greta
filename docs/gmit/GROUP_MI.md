@@ -579,9 +579,10 @@ passed; seven speaker gaze switches and 28 gaze checks passed. Listener motion
 started 205-239 ms after the scheduled Greta audio start, consistent with the
 200 ms offset rounded to 25 fps frames. Sixteen PNGs and seven WAVs remain
 local. No model was called. Audio callbacks and renders do not independently
-establish physical audio/lip acceptance; user confirmation of the final width
-and audiovisual behavior is pending. All six saved runtime scratch hashes and
-the pre-existing runtime Git status were unchanged after cleanup.
+establish physical audio/lip acceptance. The user subsequently requested still
+wider arms with lower elbows; the follow-up below supersedes this pose.
+All six saved runtime scratch hashes and the pre-existing runtime Git status
+were unchanged after cleanup.
 
 Only `bin/Environments/GMIT/group-mi-room.xml` changed in the runtime, deployed
 from the identical relative path in the development checkout. All twelve
@@ -601,3 +602,55 @@ done
 The rollback checks for later edits before replacing files. Existing launch
 commands and the NetBeans Group MI / Replay profiles load the updated room XML
 on the next launch.
+
+## Lower elbows and forward hand placement, 2026-10-30
+
+The final pose lowers elbow bone centers to 0.7547-0.7554 m, 37-93 mm below
+the published `b0fce55b` pose. After reviewing the first low-elbow preview, the
+user requested less elbow spread and hands farther forward. The final adjustment
+brings each elbow inward by about 25 mm and moves each clasp forward by 38-47 mm
+relative to that preview, keeping the lower height.
+
+The local calibration solves both arms together, preserving wrist separation,
+wrist heights, palm orientation, and the finger pose while allowing shared
+clasp translation along the tabletop. Relative to `b0fce55b`, the hands remain
+35-65 mm closer to the body; global hand positions are intentionally different.
+The exported XML still contains only fixed joint angles; no solver runs during
+ordinary playback.
+
+Only the room XML's 48 shoulder/elbow/wrist values and explanatory comment
+changed. Finger/thumb angles, avatar roots, seated legs, chairs, table, camera,
+speech and gaze code remain unchanged. Calibration evidence is local run
+`lower-elbow-calibration-20261030-142745-225` and
+`lower-elbow-calibration-20261030-143531-022`. This is a visually calibrated
+fixed pose, not a physical support or collision solver. Hidden surfaces remain
+unverified.
+
+Final silent preview `lower-elbow-calibration-20261030-143757-617` exited 0.
+Its `02-gaze-patient-b.png` full-scene gaze capture and three named hand close-ups
+show the lower elbows, reduced elbow spread, and clasp farther onto the table.
+No gross new arm/torso/table intersection was observed in those views.
+
+Ordinary replay `replay-20261030-143935-755` exited 0 with seven dispatches,
+seven intended-actor audio callbacks, seven elapsed schedule checks, seven
+speaker gaze switches, and 28 gaze verifications. Pose persistence and inactive
+mouth checks passed. Listener transition delays were 211-239 ms; sixteen PNGs
+and seven WAVs remain local. This used the existing transcript without a model
+call. Final human confirmation of the refined pose is pending; callbacks and
+renders do not establish physical audio/lip observation. All six runtime scratch
+hashes and the pre-existing runtime Git status were preserved.
+
+Deployment changed only `bin/Environments/GMIT/group-mi-room.xml` at the same
+relative path in `greta_2.1`. The other eleven allowlisted files retained their
+bytes. To restore the published `b0fce55b` pose, roll back both task receipts
+in reverse order:
+
+```bash
+for receipt in deploy-20261030T133712842014Z deploy-20261030T133010070964Z; do
+  python3 integrations/gmit/deploy.py --runtime ../greta_2.1 \
+    --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
+done
+```
+
+The existing launch commands load this updated XML on the next start. Local
+helpers, captures, transcripts, and deployment backups remain ignored.

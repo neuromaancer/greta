@@ -2,16 +2,16 @@
 <!-- Incrementally attached by SeatedScene; it never replaces the active Environment root. -->
 <node id="gmit-group-mi-room" camera_x="0.0" camera_y="1.5" camera_z="4.0" camera_pitch_degrees="-12.0">
     <!-- Seat metadata is consumed by SeatedScene; values are meters/degrees. -->
-    <!-- Per-avatar arm angles open the elbows outward while retaining the tabletop wrist positions. -->
+    <!-- Per-avatar arm angles lower the elbows and retain the clasp with coordinated tabletop hand placement. -->
     <!-- Finger flexion, staggered hand heights, and folded thumbs form a fixed clasp, independent of face/lip/blink channels. -->
     <seat actor_id="facilitator" x="0.0" z="-0.78" yaw_degrees="0.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
-          l_shoulder_flexion_degrees="-58.5498" r_shoulder_flexion_degrees="-56.0950" l_shoulder_abduct_degrees="44.1319" r_shoulder_abduct_degrees="-40.2534"
-          l_elbow_flexion_degrees="-56.0504" r_elbow_flexion_degrees="-57.8039" l_elbow_twisting_degrees="-27.6649" r_elbow_twisting_degrees="25.0975"
-          l_wrist_flexion_degrees="53.1914" r_wrist_flexion_degrees="-46.3107" l_wrist_pivot_degrees="41.6951" r_wrist_pivot_degrees="37.4133"
-          l_wrist_twisting_degrees="50.2150" r_wrist_twisting_degrees="-46.4846">
-        <arm-joint name="l_shoulder_twisting" degrees="-19.6020"/>
-        <arm-joint name="r_shoulder_twisting" degrees="19.0431"/>
+          l_shoulder_flexion_degrees="-42.8999" r_shoulder_flexion_degrees="-42.7657" l_shoulder_abduct_degrees="31.0169" r_shoulder_abduct_degrees="-30.3601"
+          l_elbow_flexion_degrees="-68.8448" r_elbow_flexion_degrees="-70.5434" l_elbow_twisting_degrees="-19.4246" r_elbow_twisting_degrees="18.8203"
+          l_wrist_flexion_degrees="36.7536" r_wrist_flexion_degrees="-36.1362" l_wrist_pivot_degrees="29.7643" r_wrist_pivot_degrees="30.9144"
+          l_wrist_twisting_degrees="32.0749" r_wrist_twisting_degrees="-31.0576">
+        <arm-joint name="l_shoulder_twisting" degrees="-21.8308"/>
+        <arm-joint name="r_shoulder_twisting" degrees="21.1745"/>
         <arm-joint name="l_index1_flexion" degrees="-25.0"/>
         <arm-joint name="l_index2_flexion" degrees="-50.0"/>
         <arm-joint name="l_index3_flexion" degrees="-25.0"/>
@@ -49,12 +49,12 @@
     </seat>
     <seat actor_id="patient-a" x="-1.02" z="0.0" yaw_degrees="50.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
-          l_shoulder_flexion_degrees="-71.8161" r_shoulder_flexion_degrees="-70.4792" l_shoulder_abduct_degrees="48.7979" r_shoulder_abduct_degrees="-56.0029"
-          l_elbow_flexion_degrees="-42.9673" r_elbow_flexion_degrees="-48.2520" l_elbow_twisting_degrees="-36.0759" r_elbow_twisting_degrees="29.7650"
-          l_wrist_flexion_degrees="72.9291" r_wrist_flexion_degrees="-73.0286" l_wrist_pivot_degrees="56.8395" r_wrist_pivot_degrees="57.6143"
-          l_wrist_twisting_degrees="54.9445" r_wrist_twisting_degrees="-55.0515">
-        <arm-joint name="l_shoulder_twisting" degrees="-21.7870"/>
-        <arm-joint name="r_shoulder_twisting" degrees="20.3874"/>
+          l_shoulder_flexion_degrees="-37.3944" r_shoulder_flexion_degrees="-36.5983" l_shoulder_abduct_degrees="18.6398" r_shoulder_abduct_degrees="-23.8147"
+          l_elbow_flexion_degrees="-68.0696" r_elbow_flexion_degrees="-72.8450" l_elbow_twisting_degrees="-16.4085" r_elbow_twisting_degrees="10.2293"
+          l_wrist_flexion_degrees="31.8851" r_wrist_flexion_degrees="-30.1146" l_wrist_pivot_degrees="22.5739" r_wrist_pivot_degrees="24.1729"
+          l_wrist_twisting_degrees="17.0380" r_wrist_twisting_degrees="-17.6311">
+        <arm-joint name="l_shoulder_twisting" degrees="-24.5157"/>
+        <arm-joint name="r_shoulder_twisting" degrees="26.2913"/>
         <arm-joint name="l_index1_flexion" degrees="-25.0"/>
         <arm-joint name="l_index2_flexion" degrees="-50.0"/>
         <arm-joint name="l_index3_flexion" degrees="-25.0"/>
@@ -92,12 +92,12 @@
     </seat>
     <seat actor_id="patient-b" x="1.02" z="0.0" yaw_degrees="-50.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
-          l_shoulder_flexion_degrees="-60.3064" r_shoulder_flexion_degrees="-57.3448" l_shoulder_abduct_degrees="44.4700" r_shoulder_abduct_degrees="-40.9615"
-          l_elbow_flexion_degrees="-57.6448" r_elbow_flexion_degrees="-59.8346" l_elbow_twisting_degrees="-28.8916" r_elbow_twisting_degrees="25.7012"
-          l_wrist_flexion_degrees="54.8445" r_wrist_flexion_degrees="-46.9938" l_wrist_pivot_degrees="43.1861" r_wrist_pivot_degrees="38.6513"
-          l_wrist_twisting_degrees="48.9448" r_wrist_twisting_degrees="-45.0375">
-        <arm-joint name="l_shoulder_twisting" degrees="-19.2080"/>
-        <arm-joint name="r_shoulder_twisting" degrees="18.4270"/>
+          l_shoulder_flexion_degrees="-46.4193" r_shoulder_flexion_degrees="-45.8030" l_shoulder_abduct_degrees="32.3375" r_shoulder_abduct_degrees="-31.9753"
+          l_elbow_flexion_degrees="-69.0243" r_elbow_flexion_degrees="-71.1525" l_elbow_twisting_degrees="-20.8514" r_elbow_twisting_degrees="19.7452"
+          l_wrist_flexion_degrees="38.3587" r_wrist_flexion_degrees="-37.0089" l_wrist_pivot_degrees="31.8198" r_wrist_pivot_degrees="32.9146"
+          l_wrist_twisting_degrees="32.3378" r_wrist_twisting_degrees="-31.0362">
+        <arm-joint name="l_shoulder_twisting" degrees="-21.3248"/>
+        <arm-joint name="r_shoulder_twisting" degrees="20.3662"/>
         <arm-joint name="l_index1_flexion" degrees="-25.0"/>
         <arm-joint name="l_index2_flexion" degrees="-50.0"/>
         <arm-joint name="l_index3_flexion" degrees="-25.0"/>
