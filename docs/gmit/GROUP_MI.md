@@ -540,3 +540,64 @@ done
 
 Stop rollback on any subsequent-edit warning. To also undo the clasped hands,
 continue with the four earlier receipts listed in the preceding section.
+
+## Wider upper arms and forearms, 2026-10-30
+
+The three avatars now open their elbows outward instead of holding the upper
+arms close to the torso. An ignored calibration helper used the actual Ogre
+skeletons to preserve the clasp while increasing each elbow's outward projection
+in actor-local coordinates. After the user requested more width than the first
+6 cm version, the final solutions increased that projection by 6.98-8.99 cm
+relative to the original pose. Elbows also move vertically and fore/aft; this
+is not a pure lateral translation. The largest wrist-position change from the
+original was approximately 1.2 mm. These are bone measurements, not skin-contact
+or collision guarantees.
+
+The room XML changes 48 shoulder, elbow, and wrist angle values. Wrist rotations
+compensate for the changed upstream arm rotations to retain the original hand
+position and palm orientation. All finger and thumb values, avatar roots,
+seated legs, furniture, and camera settings remain unchanged. The existing
+fixed arm overlay and its disable switch still apply; no runtime IK, model,
+speech, or gaze behavior was added.
+
+The baseline preview was `group-mi-20261030-132816-620`. The original and final
+joint measurements are in local calibration runs
+`wide-arm-calibration-20261030-133129-710` and
+`wide-arm-calibration-20261030-134031-828`. Helpers and captures remain ignored;
+this change adds no generated dialogue or model weights to Git.
+
+Final preview `wide-arm-calibration-20261030-134243-312` exited successfully with
+eight render captures, including one hand close-up per actor. They show more
+open elbows with the clasp retained; independent review found no gross new
+hand/torso intersection in those views. This does not establish contact on
+hidden surfaces or physical arm support by the table.
+
+The ordinary launcher replay `replay-20261030-134355-430` exited 0 after seven
+dispatches, seven intended-actor audio callbacks, and seven elapsed schedule
+checks, preserving F-A-B-F-A-B-F. The fixed pose and inactive-mouth checks
+passed; seven speaker gaze switches and 28 gaze checks passed. Listener motion
+started 205-239 ms after the scheduled Greta audio start, consistent with the
+200 ms offset rounded to 25 fps frames. Sixteen PNGs and seven WAVs remain
+local. No model was called. Audio callbacks and renders do not independently
+establish physical audio/lip acceptance; user confirmation of the final width
+and audiovisual behavior is pending. All six saved runtime scratch hashes and
+the pre-existing runtime Git status were unchanged after cleanup.
+
+Only `bin/Environments/GMIT/group-mi-room.xml` changed in the runtime, deployed
+from the identical relative path in the development checkout. All twelve
+allowlisted files were verified; the other eleven retained identical bytes.
+Existing JARs, meshes, and voice resources were not replaced. The deployment
+retains originals and the final receipt
+`deploy-20261030T124224515904Z/receipt.json`. To restore the pre-task arm pose,
+roll back both task receipts in reverse order:
+
+```bash
+for receipt in deploy-20261030T124224515904Z deploy-20261030T123326447835Z; do
+  python3 integrations/gmit/deploy.py --runtime ../greta_2.1 \
+    --rollback "../greta_2.1/bin/GMIT/local/$receipt/receipt.json" || break
+done
+```
+
+The rollback checks for later edits before replacing files. Existing launch
+commands and the NetBeans Group MI / Replay profiles load the updated room XML
+on the next launch.
