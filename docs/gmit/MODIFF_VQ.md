@@ -169,9 +169,17 @@ particular run; stale identity rejection is covered by headless checks.
 The run retained the seated pose, independent actor chains, and the existing
 listener delay (205 to 233 ms after audio start). Six runtime scratch hashes were
 unchanged after cleanup. The worker exited with status 0 and marked itself
-stopped. Render captures show the seated scene; physical audio, lip appearance,
-and the perceptual quality of eyebrow adaptation require human observation.
-No new human acceptance is claimed by these programmatic results.
+stopped. These initial runs established programmatic and render evidence.
+
+During the repeat `replay-20261102-150333-745`, the user confirmed on 2026-11-02
+that the facilitator's eyebrow changes were visible and that sound, lip
+synchronization, blinking, and gaze were normal. Translated user feedback:
+"Eyebrow changes are visible; everything else is normal." This establishes
+human audiovisual acceptance of this short facilitator-only engineering replay;
+it does not establish OpenFace-equivalent input validity or the semantic
+appropriateness of the generated expressions.
+The repeat also completed all seven utterances and 28 gaze checks, applied 109
+model replies, and discarded two replies whose gaze target epoch had changed.
 
 The default-off silent preview `group-mi-20261102-143901-756` also completed,
 with nine gaze checks and no MODIFF bridge activity or model worker. The runtime
