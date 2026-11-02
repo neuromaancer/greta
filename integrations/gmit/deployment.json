@@ -11,6 +11,8 @@
     "bin/GMIT/SeatedScene.java",
     "bin/GMIT/ListenerGaze.java",
     "bin/GMIT/GazeModiffAdapter.java",
+    "bin/GMIT/MeaningMinerBridge.java",
+    "bin/GMIT/MeaningGesture.java",
     "bin/Environments/GMIT/group-mi-room.xml",
     "bin/GMIT/Start-GMIT.ps1",
     "bin/GMIT/local/.gitignore"

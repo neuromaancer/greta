@@ -25,6 +25,7 @@ public final class SeatedScene {
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
     private static final Set<String> ARM_JOINTS = armJointNames();
     private static final boolean ARMS = Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true"));
+    private static final boolean MEANING_GESTURES = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.enabled", "false"));
     private static final List<PoseController> CONTROLLERS = new ArrayList<PoseController>();
     private static volatile boolean installed;
     private static volatile Throwable poseFailure;
@@ -70,6 +71,35 @@ public final class SeatedScene {
         for (PoseController controller : CONTROLLERS) controller.close();
         CONTROLLERS.clear();
         installed = false;
+    }
+
+    /** Schedules a facilitator-only arm overlay from actual Audio Timer timestamps. */
+    public static synchronized boolean scheduleMeaningGesture(String eventId, List<String> schemas,
+                                                               long audioStartMillis, long audioEndMillis) throws Exception {
+        if (!MEANING_GESTURES || !ARMS || !installed) return false;
+        if (audioEndMillis <= audioStartMillis || audioEndMillis - audioStartMillis > 15000) return false;
+        PoseController facilitator = null;
+        for (PoseController controller : CONTROLLERS) if ("facilitator".equals(controller.actor)) facilitator = controller;
+        if (facilitator == null) throw new IllegalStateException("Facilitator tabletop pose is unavailable");
+        int start = Math.max(facilitator.currentFrame() + 2, frameAtOrAfter(audioStartMillis));
+        MeaningGesture.Plan plan = MeaningGesture.create(eventId, schemas, start, frameAtOrAfter(audioEndMillis));
+        if (plan == null) return false;
+        facilitator.scheduleMeaningGesture(plan);
+        System.out.println("GMIT_MEANING_GESTURE scheduled event=" + plan.eventId + " schema=" + plan.schema
+                + " start_frame=" + plan.startFrame + " finish_frame=" + plan.finishFrame);
+        return true;
+    }
+
+    /** Records the actual facilitator arm frame while an opt-in gesture is due. */
+    public static synchronized void observeMeaningGesture() throws Exception {
+        if (!MEANING_GESTURES || !installed) return;
+        for (PoseController controller : CONTROLLERS) if ("facilitator".equals(controller.actor)) controller.observeMeaningGesture();
+    }
+
+    private static int frameAtOrAfter(long millis) {
+        if (millis < 0 || millis > Integer.MAX_VALUE * (long)MeaningGesture.FRAME_MILLIS)
+            throw new IllegalArgumentException("Out-of-range Greta Timer time: " + millis);
+        return (int)((millis + MeaningGesture.FRAME_MILLIS - 1) / MeaningGesture.FRAME_MILLIS);
     }
 
     private static Object require(Map<String, Object> objects, String id) {
@@ -280,6 +310,9 @@ public final class SeatedScene {
     private static final class PoseController {
         private final String actor; private final PoseSpec pose; private final Object avatar, body; private final ClassLoader loader;
         private Object proxy;
+        private volatile MeaningGesture.Plan meaningGesture;
+        private String observedMeaningEvent;
+        private boolean observedMeaningPeak, observedMeaningRestored;
 
         PoseController(String actor, PoseSpec pose, Object avatar, Object body) {
             this.actor = actor; this.pose = pose; this.avatar = avatar; this.body = body; this.loader = avatar.getClass().getClassLoader();
@@ -331,6 +364,53 @@ public final class SeatedScene {
             return SeatedScene.invoke(avatar, "performBAPFrames", overlaid, id);
         }
 
+        int currentFrame() throws Exception {
+            Class<?> timerClass = loader.loadClass("greta.core.util.time.Timer");
+            return ((Number)timerClass.getMethod("getCurrentFrameNumber").invoke(null)).intValue();
+        }
+
+        synchronized void scheduleMeaningGesture(MeaningGesture.Plan plan) throws Exception {
+            if (!"facilitator".equals(actor)) throw new IllegalStateException("Meaning gesture must belong to facilitator");
+            meaningGesture = plan;
+            observedMeaningEvent = plan.eventId;
+            observedMeaningPeak = false;
+            observedMeaningRestored = false;
+            Class<?> frameClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPFrame");
+            Constructor<?> constructor = frameClass.getConstructor(Integer.TYPE);
+            List<Object> frames = new ArrayList<Object>();
+            for (int frame = plan.startFrame; frame <= plan.finishFrame; frame++) {
+                Object output = constructor.newInstance(frame);
+                applyMeaningArms(output, plan);
+                frames.add(output);
+            }
+            // Arm-only masks cover already queued body frames without replacing
+            // legs, root placement, neck, face, or the other two actors.
+            invoke(avatar, "performBAPFrames", frames, newID());
+        }
+
+        synchronized void observeMeaningGesture() throws Exception {
+            MeaningGesture.Plan plan = meaningGesture;
+            if (plan == null) return;
+            int frameNumber = currentFrame();
+            Object frame = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            if (plan.covers(frameNumber) && !observedMeaningPeak && plan.weight(frameNumber) >= .9) {
+                assertMeaningArms(frame, types, plan);
+                System.out.println("GMIT_MEANING_GESTURE observed event=" + plan.eventId + " schema=" + plan.schema
+                        + " frame=" + frameNumber + " weight=" + plan.weight(frameNumber)
+                        + " right_shoulder_flexion_deg=" + degree(frame, types, "r_shoulder_flexion"));
+                observedMeaningPeak = true;
+            }
+            if (plan.expired(frameNumber) && !observedMeaningRestored) {
+                assertArm(frame, types, "r_shoulder_flexion", arm("r_shoulder_flexion", pose.rShoulderFlexion));
+                assertArm(frame, types, "r_elbow_flexion", arm("r_elbow_flexion", pose.rElbowFlexion));
+                for (Map.Entry<String, Double> override : pose.armOverrides.entrySet())
+                    if (rightFinger(override.getKey())) assertArm(frame, types, override.getKey(), override.getValue().doubleValue());
+                System.out.println("GMIT_MEANING_GESTURE restored event=" + plan.eventId + " frame=" + frameNumber);
+                observedMeaningRestored = true;
+            }
+        }
+
         private void overlay(Object frame) throws Exception {
             Class<?> typeClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
             setDegrees(frame, typeClass, "sacroiliac_tilt", pose.sacroiliac);
@@ -346,6 +426,11 @@ public final class SeatedScene {
             setDegrees(frame, typeClass, "l_wrist_pivot", pose.lWristPivot); setDegrees(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
             setDegrees(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting); setDegrees(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
             for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) setDegrees(frame, typeClass, override.getKey(), override.getValue().doubleValue());
+            MeaningGesture.Plan plan = meaningGesture;
+            // Incoming body batches can contain future frames.  Keep the plan
+            // immutable and apply zero weight outside its interval rather than
+            // clearing it from an unrelated queued frame.
+            if ("facilitator".equals(actor) && plan != null) applyMeaningArms(frame, plan);
             }
             setValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
             setValue(frame, typeClass, "HumanoidRoot_tr_vertical", (int)Math.round(pose.vertical));
@@ -364,20 +449,68 @@ public final class SeatedScene {
             assertMask(frame, typeClass, "l_ankle_flexion"); assertDegrees(frame, typeClass, "l_ankle_flexion", pose.ankle);
             assertMask(frame, typeClass, "r_ankle_flexion"); assertDegrees(frame, typeClass, "r_ankle_flexion", pose.ankle);
             if (ARMS) {
-            assertArm(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion); assertArm(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
-            assertArm(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion); assertArm(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
-            assertArm(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting); assertArm(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
-            assertArm(frame, typeClass, "l_wrist_pivot", pose.lWristPivot); assertArm(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
-            assertArm(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting); assertArm(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
-            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) assertArm(frame, typeClass, override.getKey(), override.getValue().doubleValue());
+            assertArm(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion);
+            assertArm(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion);
+            assertArm(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting);
+            assertArm(frame, typeClass, "l_wrist_pivot", pose.lWristPivot);
+            assertArm(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting);
+            MeaningGesture.Plan plan = meaningGesture;
+            int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
+            if ("facilitator".equals(actor) && plan != null && plan.covers(frameNumber)) assertMeaningArms(frame, typeClass, plan);
+            else {
+                assertArm(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
+                assertArm(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
+                assertArm(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
+                assertArm(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
+                assertArm(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
+                for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) assertArm(frame, typeClass, override.getKey(), override.getValue().doubleValue());
+            }
             }
             assertMask(frame, typeClass, "HumanoidRoot_rt_body_turn"); assertDegrees(frame, typeClass, "HumanoidRoot_rt_body_turn", pose.yaw);
             assertValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
             assertValue(frame, typeClass, "HumanoidRoot_tr_frontal", (int)Math.round(pose.z * 1000.0));
             assertValue(frame, typeClass, "HumanoidRoot_tr_vertical", (int)Math.round(pose.vertical));
+            observeMeaningGesture();
         }
 
         private Object newID() throws Exception { return loader.loadClass("greta.core.util.id.IDProvider").getMethod("createID", String.class).invoke(null, "gmit-seated-" + actor); }
+        private void applyMeaningArms(Object frame, MeaningGesture.Plan plan) throws Exception {
+            double weight = plan.weight(((Number)invoke(frame, "getFrameNumber")).intValue());
+            Class<?> typeClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            MeaningGesture.Profile profile = plan.profile;
+            setDegrees(frame, typeClass, "r_shoulder_flexion", arm("r_shoulder_flexion", pose.rShoulderFlexion) + profile.shoulderFlexion * weight);
+            setDegrees(frame, typeClass, "r_shoulder_abduct", arm("r_shoulder_abduct", pose.rShoulderAbduct) + profile.shoulderAbduct * weight);
+            setDegrees(frame, typeClass, "r_elbow_flexion", arm("r_elbow_flexion", pose.rElbowFlexion) + profile.elbowFlexion * weight);
+            setDegrees(frame, typeClass, "r_elbow_twisting", arm("r_elbow_twisting", pose.rElbowTwisting) + profile.elbowTwisting * weight);
+            setDegrees(frame, typeClass, "r_wrist_flexion", arm("r_wrist_flexion", pose.rWristFlexion) + profile.wristFlexion * weight);
+            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) {
+                String name = override.getKey();
+                if (rightFinger(name)) setDegrees(frame, typeClass, name,
+                        override.getValue().doubleValue() * (1 - profile.release * weight));
+            }
+        }
+        private double arm(String name, double fallback) { return pose.arm(name, fallback); }
+        private double degree(Object frame, Class<?> types, String name) throws Exception {
+            return ((Number)SeatedScene.invoke(frame, "getDegreeValue", type(types, name))).doubleValue();
+        }
+        private static boolean rightFinger(String name) {
+            return name.startsWith("r_thumb") || name.startsWith("r_index") || name.startsWith("r_middle")
+                    || name.startsWith("r_ring") || name.startsWith("r_pinky");
+        }
+        private void assertMeaningArms(Object frame, Class<?> types, MeaningGesture.Plan plan) throws Exception {
+            double weight = plan.weight(((Number)invoke(frame, "getFrameNumber")).intValue());
+            MeaningGesture.Profile profile = plan.profile;
+            assertDegrees(frame, types, "r_shoulder_flexion", arm("r_shoulder_flexion", pose.rShoulderFlexion) + profile.shoulderFlexion * weight);
+            assertDegrees(frame, types, "r_shoulder_abduct", arm("r_shoulder_abduct", pose.rShoulderAbduct) + profile.shoulderAbduct * weight);
+            assertDegrees(frame, types, "r_elbow_flexion", arm("r_elbow_flexion", pose.rElbowFlexion) + profile.elbowFlexion * weight);
+            assertDegrees(frame, types, "r_elbow_twisting", arm("r_elbow_twisting", pose.rElbowTwisting) + profile.elbowTwisting * weight);
+            assertDegrees(frame, types, "r_wrist_flexion", arm("r_wrist_flexion", pose.rWristFlexion) + profile.wristFlexion * weight);
+            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) {
+                if (rightFinger(override.getKey())) assertDegrees(frame, types, override.getKey(),
+                        override.getValue().doubleValue() * (1 - profile.release * weight));
+                else assertArm(frame, types, override.getKey(), override.getValue().doubleValue());
+            }
+        }
         @SuppressWarnings({"unchecked", "rawtypes"}) private static Object type(Class<?> types, String name) { return Enum.valueOf((Class<Enum>)types.asSubclass(Enum.class), name); }
         private static void setDegrees(Object frame, Class<?> types, String name, double value) throws Exception { SeatedScene.invoke(frame, "setDegreeValue", type(types, name), value); }
         private static void setValue(Object frame, Class<?> types, String name, int value) throws Exception { SeatedScene.invoke(frame, "setMaskAndValue", type(types, name), true, value); }

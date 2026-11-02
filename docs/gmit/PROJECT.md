@@ -24,6 +24,11 @@ local CPU preflight and a gaze-selected virtual-AU bridge. It is separate from
 the accepted ordinary replay configuration. See [MODIFF_VQ.md](MODIFF_VQ.md)
 for the input approximations, startup, and verification limits.
 
+The opt-in [MeaningMiner extension](MEANING_MINER.md) extracts English semantic
+markers from facilitator text and selects a bounded tabletop hand gesture.
+It preserves the single speech route and blends back to the calibrated clasp.
+Ordinary replay leaves it disabled; Pure/RL decisions are unaffected.
+
 ## Baseline and ownership
 
 | Workspace | Verified state before edits | Responsibility |
@@ -119,9 +124,10 @@ signals reach the Planner). The bounded probe caught two audio callbacks and
 aborted. P1 therefore uses existing BML readers, without modifying old Java/JARs.
 The optional Ini Manager UI node was removed: explicit `setDefinition` hits an
 existing `languageIniLoader` null reference; the global IniManager already loads
-`./Greta.ini`. No NVBG, MeaningMiner, VAP, MODIFF, OpenFace, ASR, or LLM module is
-instantiated by the new scene. Registry discovery messages for such modules do
-not mean those modules were instantiated.
+`./Greta.ini`. The scene graph instantiates no NVBG, MeaningMiner, VAP, MODIFF,
+OpenFace, ASR, or LLM module. Opt-in helpers separately attach MeaningMiner
+semantic extraction or MODIFF eyebrow adaptation. Registry discovery messages
+alone do not mean a module was instantiated.
 
 `SmokeProbe.java` loads the actual runtime Modular graph, records the actual
 JAR code sources, checks distinct managers, dispatches F-A-B-F once, saves each
@@ -133,9 +139,11 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete thirteen-file allowlist: the scene,
+`integrations/gmit/deployment.json` is the complete fifteen-file allowlist: the scene,
 four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
-source, seated-pose helper, listener-gaze helper, optional MODIFF bridge, room layout, and local-output ignore file. Every source path maps to the identical
+source, seated-pose helper, listener-gaze helper, optional MODIFF bridge,
+MeaningMiner bridge and gesture helper, room layout, and local-output ignore
+file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,
 deployment tooling and this document remain in the development checkout.

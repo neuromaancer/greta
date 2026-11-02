@@ -2,6 +2,7 @@ param(
     [string]$Runtime,
     [string]$Replay,
     [switch]$Preview,
+    [switch]$MeaningMiner,
     [string]$Distribution = 'Ubuntu',
     [string]$PythonPath = $env:GRETA_MODIFF_PYTHON,
     [string]$JavaHome,
@@ -117,6 +118,7 @@ try {
     if ($JavaHome) { $launch.JavaHome = $JavaHome }
     if ($Replay) { $launch.Replay = $Replay } else { $launch.GroupMI = $true }
     if ($Preview) { $launch.Preview = $true }
+    if ($MeaningMiner) { $launch.MeaningMiner = $true }
     & $launcher @launch
     if (Test-Path -LiteralPath (Join-Path $run 'error.json')) {
         throw ('MODIFF failed; inspect ' + (Join-Path $run 'error.json'))

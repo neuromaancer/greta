@@ -23,6 +23,7 @@ import org.xml.sax.SAXException;
 public final class SmokeProbe {
     private static final Map<String, Object> objects = new LinkedHashMap<>();
     private static final Map<String, List<Object>> audio = new ConcurrentHashMap<>();
+    private static final Map<String, List<String>> meaningPlans = new HashMap<>();
     private static File output;
     private static Object captureTarget;
     private static volatile Throwable failure;
@@ -318,7 +319,9 @@ public final class SmokeProbe {
             // Window back-buffer capture can return black when the window is occluded.
             Class<?> texture = player.getClass().getClassLoader().loadClass("greta.auxiliary.player.ogre.OgreRenderTexture");
             captureTarget = texture.getConstructor(camera.getClass()).newInstance(camera);
-            call(captureTarget,"setSize",new Class<?>[]{int.class,int.class},920,576);
+            int captureWidth = Integer.getInteger("gmit.capture.width", 920);
+            if (captureWidth < 640 || captureWidth > 2560) throw new IllegalArgumentException("Capture width must be 640 to 2560");
+            call(captureTarget,"setSize",new Class<?>[]{int.class,int.class},captureWidth,(int)Math.round(captureWidth * 576.0 / 920.0));
             call(captureTarget,"prepareCapture");
             Thread.sleep(300);
             log("capture=OgreRenderTexture same_player_camera=true desktop_visibility=unverified");
@@ -382,6 +385,10 @@ public final class SmokeProbe {
         long end = ((Number)call(a,"getEndMillis")).longValue();
         String gazePeer = gazePeer(actor, ordinal);
         ListenerGaze.scheduleSpeech(actor, gazePeer, start, end);
+        boolean meaningGesture = scenarioTurn != null && "facilitator".equals(actor)
+                && meaningPlans.containsKey(scenarioTurn.eventId)
+                && SeatedScene.scheduleMeaningGesture(scenarioTurn.eventId,
+                        meaningPlans.get(scenarioTurn.eventId), start, end);
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         long engineNow = ((Number)clock.invoke(null)).longValue();
         long remaining = end-engineNow;
@@ -389,14 +396,21 @@ public final class SmokeProbe {
         long stop = System.currentTimeMillis()+remaining+turnGap*1000L+2000;
         int frame = 0;
         boolean capturedSpeakerShift = false;
+        boolean capturedMeaningGesture = false;
         while (((Number)clock.invoke(null)).longValue()<end+turnGap*1000L) {
             if (caption != null) caption.checkCancelled();
             if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
             if (failure != null) throw new IllegalStateException("Playback thread failed", failure);
             assertAudioCounts(scheduled);
+            SeatedScene.observeMeaningGesture();
             if ("Synthetic authored dialogue".equals(activeProvenance)) capture(String.format("%02d-%s-%03d", ordinal, actor, frame++));
             else if ((ordinal <= 3 || ordinal == total || ordinal % 25 == 0) && frame++ == 0) capture(String.format("%03d-%s", ordinal, actor));
             if (scenarioTurn != null && frame == 12) capture(String.format("gaze-%03d-%s", ordinal, actor));
+            if (meaningGesture && !capturedMeaningGesture
+                    && ((Number)clock.invoke(null)).longValue() >= start + duration * 45 / 100) {
+                capture(String.format("meaning-%03d-%s", ordinal, actor));
+                capturedMeaningGesture = true;
+            }
             if (scenarioTurn != null && duration >= 3500 && !capturedSpeakerShift
                     && ((Number)clock.invoke(null)).longValue() >= start + duration / 2 + 1300) {
                 capture(String.format("speaker-shift-%03d-%s", ordinal, actor));
@@ -406,6 +420,8 @@ public final class SmokeProbe {
         }
         assertAudioCounts(scheduled);
         expected.put(actor, scheduled.get(actor));
+        SeatedScene.verifyPose();
+        if (meaningGesture) capture(String.format("meaning-restored-%03d-%s", ordinal, actor));
         log("schedule_elapsed sequence="+ordinal+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
     }
 
@@ -433,10 +449,11 @@ public final class SmokeProbe {
         catch (CancelledException cancelled) { log("CANCELLED " + cancelled.getMessage()); }
         catch (Throwable e) { log("FAILED " + e); e.printStackTrace(); }
         finally {
+            MeaningMinerBridge.close();
             GazeModiffAdapter.close();
             ListenerGaze.close();
             SeatedScene.close();
-            try { SeatedScene.checkHealthy(); ListenerGaze.checkHealthy(); GazeModiffAdapter.checkHealthy(); }
+            try { SeatedScene.checkHealthy(); ListenerGaze.checkHealthy(); GazeModiffAdapter.checkHealthy(); MeaningMinerBridge.checkHealthy(); }
             catch (Throwable e) { log("FAILED seated_cleanup " + e); status = 1; }
             System.exit(status);
         }
@@ -463,6 +480,10 @@ public final class SmokeProbe {
         }
         if (startDelay<0 || startDelay>15 || turnGap<1 || turnGap>5 || endHold<0 || endHold>15) throw new IllegalArgumentException("Observation delays out of bounds");
         Scenario scenario = args.length == 6 ? readScenario(new File(args[5])) : null;
+        if (Boolean.getBoolean("gmit.meaningminer.enabled")
+                && (scenario == null || !Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true")))) {
+            throw new IllegalArgumentException("MeaningMiner requires a seated scenario with tabletop arms enabled");
+        }
         if (scenario != null) activeProvenance = "synthetic-authored".equals(scenario.provenance) ? "Synthetic authored dialogue" : "Recorded offline replay — " + scenario.provenance + (scenario.condition == null ? "" : " / " + scenario.condition);
         output = new File(args[1]);
         if (!output.isDirectory()) throw new IllegalArgumentException("Output directory must exist");
@@ -502,6 +523,18 @@ public final class SmokeProbe {
             if (scenario == null) throw new IllegalArgumentException("MODIFF requires the seated scenario");
             GazeModiffAdapter.install(objects, output);
         }
+        if (Boolean.getBoolean("gmit.meaningminer.enabled")) {
+            title("Preparing facilitator MeaningMiner gestures");
+            MeaningMinerBridge.install(objects, output);
+            for (Turn turn : scenario.turns) {
+                if ("facilitator".equals(turn.actor)) {
+                    caption.checkCancelled();
+                    meaningPlans.put(turn.eventId, MeaningMinerBridge.analyze(turn.eventId, turn.text));
+                }
+            }
+            log("meaningminer_prepared facilitator_turns=" + meaningPlans.size()
+                    + " dialogue_changed=false speech_generated=false");
+        }
         Thread.sleep(2000);
         SeatedScene.verifyPose();
         capture("00-scene");
@@ -509,6 +542,30 @@ public final class SmokeProbe {
             title("Seated group MI preview — no speech");
             Thread.sleep(3000);
             capture("01-seated-preview");
+            if (Boolean.getBoolean("gmit.meaningminer.enabled")) {
+                Method clock = Class.forName("greta.core.util.time.Timer").getMethod("getTimeMillis");
+                for (Turn turn : scenario.turns) {
+                    if (!meaningPlans.containsKey(turn.eventId)) continue;
+                    long start = ((Number)clock.invoke(null)).longValue() + 500;
+                    long end = start + 6000;
+                    if (!SeatedScene.scheduleMeaningGesture("preview-" + turn.eventId,
+                            meaningPlans.get(turn.eventId), start, end)) continue;
+                    log("meaningminer_preview event_id=" + turn.eventId + " speech=false timer_interval=synthetic");
+                    long deadlinePreview = System.currentTimeMillis() + 10000;
+                    int sample = 0;
+                    while (((Number)clock.invoke(null)).longValue() < end + 300) {
+                        caption.checkCancelled();
+                        if (System.currentTimeMillis() > deadlinePreview) throw new IllegalStateException("Gesture preview clock stalled");
+                        SeatedScene.checkHealthy();
+                        SeatedScene.observeMeaningGesture();
+                        if (sample++ % 5 == 0) capture(String.format("meaning-preview-%03d", sample));
+                        Thread.sleep(100);
+                    }
+                    SeatedScene.verifyPose();
+                    capture("meaning-preview-restored");
+                    break;
+                }
+            }
             for (String actor : ACTORS) {
                 ListenerGaze.focus(actor);
                 Thread.sleep(1800);

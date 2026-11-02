@@ -144,6 +144,16 @@ output to facilitator eyebrow channels while preserving lips, blink, gaze,
 and seated pose. Model readiness and routing do not establish perceptual or
 scientific validity. Do not add patient expression fixtures to ordinary replay.
 
+The authorized MeaningMiner extension is opt-in and facilitator-only; see
+`docs/gmit/MEANING_MINER.md`. Extract genuine English image-schema intentions
+without connecting a second FML/Planner/TTS speech route. SeatedScene blends a
+bounded right-arm envelope selected from the sorted schema types using actual
+Audio timing, then restores the calibrated clasp. Preserve patient poses, left
+arm, root/legs, gaze, lips, blink, and MODIFF brows. Empty semantic output means
+no gesture. This is not full dictionary realization or word-aligned behavior.
+Preserve the legacy `fml_output_mm.xml` diagnostic file, including after an owned
+child process timeout. Ordinary replay leaves the extension disabled.
+
 ## Agent responsibilities
 
 Run at most two implementation workers concurrently:

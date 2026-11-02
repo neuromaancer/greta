@@ -1,6 +1,7 @@
 param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [switch]$DisableListenerGaze, [switch]$DisableTabletopArms,
+    [switch]$MeaningMiner,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
@@ -12,6 +13,9 @@ if ($modes.Count -gt 1) {
     throw 'Choose only one of -Smoke, -GroupMI, -Replay, or -Original.'
 }
 $automatic = $Smoke -or $GroupMI -or [bool]$Replay
+if ($MeaningMiner -and ((-not ($GroupMI -or $Replay)) -or $DisableTabletopArms)) {
+    throw 'MeaningMiner requires a seated GroupMI/Replay run with tabletop arms enabled.'
+}
 if ($ModiffDirectory) {
     if ((-not ($GroupMI -or $Replay)) -or $DisableListenerGaze) {
         throw 'MODIFF requires a seated GroupMI/Replay run with gaze enabled.'
@@ -74,7 +78,7 @@ $runPrefix = if ($GroupMI) { 'group-mi-' } elseif ($Replay) { 'replay-' } else {
 $run = Join-Path $PSScriptRoot ('local\' + $runPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $run | Out-Null
 # These existing runtime scratch files are restored even when startup/playback fails.
-$mutable = @('ModularSave.xml', 'fml_to_bml.xml', 'Log\Ogre.log', 'Player\Lib\External\Win64\Plugins_OpenGL.cfg')
+$mutable = @('ModularSave.xml', 'fml_to_bml.xml', 'fml_output_mm.xml', 'Log\Ogre.log', 'Player\Lib\External\Win64\Plugins_OpenGL.cfg')
 $present = @{}
 foreach ($name in $mutable) {
     $path = Join-Path $bin $name
@@ -86,6 +90,7 @@ $process = $null
 try {
     if ($automatic) {
         $compileArgs = @('-encoding', 'UTF-8', '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'ListenerGaze.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'GazeModiffAdapter.java') + '"'))
+        $compileArgs += @(('"' + (Join-Path $PSScriptRoot 'MeaningMinerBridge.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'MeaningGesture.java') + '"'))
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -106,6 +111,7 @@ try {
         if ($Preview) { $arguments = @('-Dgmit.preview=true') + $arguments }
         if ($DisableListenerGaze) { $arguments = @('-Dgmit.gaze.enabled=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
+        if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }
@@ -113,6 +119,7 @@ try {
     if ($GroupMI) { Write-Output ('Synthetic authored group MI demo: ' + $turnCount + ' turns; no live GMIT or dialogue generation.') }
     if ($Replay) { Write-Output ('Offline recorded replay: ' + $turnCount + ' chunks; no live GMIT or dialogue generation.') }
     if ($ModiffDirectory) { Write-Output 'Experimental facilitator eyebrow adaptation uses the external local MODIFF worker.' }
+    if ($MeaningMiner) { Write-Output 'MeaningMiner adds bounded facilitator hand gestures from the original text; it does not generate dialogue.' }
     $process = Start-Process -FilePath $java -ArgumentList $arguments -WorkingDirectory $bin -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError (Join-Path $run 'stderr.log') -PassThru
     $null = $process.Handle
     if ($automatic) {
