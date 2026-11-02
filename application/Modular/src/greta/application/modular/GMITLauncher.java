@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import javax.swing.JFileChooser;
 
-/** Opt-in NetBeans entry for group MI scripts and transcript replay; no model backend. */
+/** NetBeans group MI/replay entry; optional external MODIFF never generates dialogue. */
 final class GMITLauncher {
     private static final String[] SCRATCH = {
         "ModularSave.xml", "fml_to_bml.xml", "Log/Ogre.log",
@@ -69,7 +69,7 @@ final class GMITLauncher {
         Path scenario = replay == null ? bin.resolve("Examples/GMIT/group-mi-red-meat.xml") : replay;
         for (Path required : Arrays.asList(bin.resolve("Modular.jar"), scene, scenario,
                 helpers.resolve("SmokeProbe.java"), helpers.resolve("SeatedScene.java"),
-                helpers.resolve("ListenerGaze.java"),
+                helpers.resolve("ListenerGaze.java"), helpers.resolve("GazeModiffAdapter.java"),
                 bin.resolve("Environments/GMIT/group-mi-room.xml"))) {
             if (!Files.isRegularFile(required)) {
                 throw new IllegalStateException("Set Working Directory to the complete runtime bin and deploy the GMIT allowlist. Missing: " + required);
@@ -89,7 +89,8 @@ final class GMITLauncher {
         System.out.println((replay == null ? "Synthetic red-meat-reduction group MI" : "Offline recorded replay") + "; output: " + output);
         runOwned(Arrays.asList(javac.toString(), "-encoding", "UTF-8", "-source", "1.8", "-target", "1.8",
                 "-classpath", System.getProperty("java.class.path"), "-d", output.toString(), helpers.resolve("SmokeProbe.java").toString(),
-                helpers.resolve("SeatedScene.java").toString(), helpers.resolve("ListenerGaze.java").toString()), bin, output, "compile", 30);
+                helpers.resolve("SeatedScene.java").toString(), helpers.resolve("ListenerGaze.java").toString(),
+                helpers.resolve("GazeModiffAdapter.java").toString()), bin, output, "compile", 30);
         if (replay != null) {
             runOwned(Arrays.asList(java.toString(), "-cp", output + File.pathSeparator + System.getProperty("java.class.path"),
                     "SmokeProbe", "--validate", scenario.toString()), bin, output, "validate", 30);
@@ -112,7 +113,7 @@ final class GMITLauncher {
             List<String> command = new ArrayList<>();
             command.add(java.toString());
             command.add("-Djava.library.path=" + bin.resolve("Player/Lib/External/Win64"));
-            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms")) {
+            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms", "gmit.modiff.dir")) {
                 if (System.getProperty(property) != null) command.add("-D" + property + "=" + System.getProperty(property));
             }
             // Keep the IDE's actual source-build classpath. Do not replace it with

@@ -19,7 +19,7 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-/** Bounded local probe for authored scripts or offline transcript replay; no model backend. */
+/** Bounded transcript replay; optional external MODIFF worker never generates dialogue. */
 public final class SmokeProbe {
     private static final Map<String, Object> objects = new LinkedHashMap<>();
     private static final Map<String, List<Object>> audio = new ConcurrentHashMap<>();
@@ -290,6 +290,7 @@ public final class SmokeProbe {
         SeatedScene.checkHealthy();
         SeatedScene.verifyPose();
         ListenerGaze.verify();
+        GazeModiffAdapter.checkHealthy();
         for (String actor : audio.keySet()) {
             Object frame = call(objects.get("gmit-"+actor+"-avatar"),"getCurrentFAPFrame");
             int jaw = (Integer)call(frame,"getValue",new Class<?>[]{int.class},3);
@@ -432,9 +433,10 @@ public final class SmokeProbe {
         catch (CancelledException cancelled) { log("CANCELLED " + cancelled.getMessage()); }
         catch (Throwable e) { log("FAILED " + e); e.printStackTrace(); }
         finally {
+            GazeModiffAdapter.close();
             ListenerGaze.close();
             SeatedScene.close();
-            try { SeatedScene.checkHealthy(); ListenerGaze.checkHealthy(); }
+            try { SeatedScene.checkHealthy(); ListenerGaze.checkHealthy(); GazeModiffAdapter.checkHealthy(); }
             catch (Throwable e) { log("FAILED seated_cleanup " + e); status = 1; }
             System.exit(status);
         }
@@ -496,6 +498,10 @@ public final class SmokeProbe {
         hideAutomaticReaderFrames();
         Caption caption = scenario == null ? null : new Caption(scenario.title);
         if (scenario != null) { SeatedScene.install(objects); ListenerGaze.install(objects); }
+        if (System.getProperty("gmit.modiff.dir") != null) {
+            if (scenario == null) throw new IllegalArgumentException("MODIFF requires the seated scenario");
+            GazeModiffAdapter.install(objects, output);
+        }
         Thread.sleep(2000);
         SeatedScene.verifyPose();
         capture("00-scene");
@@ -511,6 +517,7 @@ public final class SmokeProbe {
                 capture("02-gaze-" + actor);
             }
             SeatedScene.checkHealthy();
+            GazeModiffAdapter.verify();
             log("COMPLETE mode=seated_preview speech=false");
             return;
         }
@@ -550,10 +557,12 @@ public final class SmokeProbe {
                 if (caption != null) caption.checkCancelled();
                 if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
                 SeatedScene.checkHealthy();
+                GazeModiffAdapter.checkHealthy();
                 assertAudioCounts(expected);
                 long remaining = holdUntil - System.currentTimeMillis();
                 if (remaining > 0) Thread.sleep(Math.min(100L, remaining));
             } while (System.currentTimeMillis() < holdUntil);
+            GazeModiffAdapter.verify();
             if (scenario == null) log("COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation");
             else log("COMPLETE mode=" + ("synthetic-authored".equals(scenario.provenance) ? "synthetic_group_mi" : "recorded_replay") + " provenance=" + scenario.provenance + " session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation");
         } finally {

@@ -1,6 +1,6 @@
 # GMIT in Greta
 
-Updated 2026-10-30. P0 inspection and synthetic P1 acceptance are complete.
+Updated 2026-11-02. P0 inspection and synthetic P1 acceptance are complete.
 The authored group MI extension adds a 13-turn conversation about reducing
 red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
 for launch commands, NetBeans settings, and evidence.
@@ -18,6 +18,11 @@ environment, a hash-verified private checkpoint and encoder, and one bounded
 episode through the existing round-robin evaluation wrapper.
 Training, batch evaluation, GMIT source edits, and runtime-repository commits
 remain outside this integration.
+
+An opt-in facilitator-only MODIFF-VQ engineering experiment now has a strict
+local CPU preflight and a gaze-selected virtual-AU bridge. It is separate from
+the accepted ordinary replay configuration. See [MODIFF_VQ.md](MODIFF_VQ.md)
+for the input approximations, startup, and verification limits.
 
 ## Baseline and ownership
 
@@ -128,9 +133,9 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete twelve-file allowlist: the scene,
+`integrations/gmit/deployment.json` is the complete thirteen-file allowlist: the scene,
 four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
-source, seated-pose helper, listener-gaze helper, room layout, and local-output ignore file. Every source path maps to the identical
+source, seated-pose helper, listener-gaze helper, optional MODIFF bridge, room layout, and local-output ignore file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,
 deployment tooling and this document remain in the development checkout.

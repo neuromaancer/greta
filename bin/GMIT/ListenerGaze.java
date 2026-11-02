@@ -132,6 +132,7 @@ public final class ListenerGaze {
             // is at the requested frame, not one extra 40 ms frame later.
             listener.shift(start - 1, new double[] {headYaw, headPitch, eyeYaw, eyePitch});
             listener.publishTransition(start - 1, Math.max(start + 23, endFrame));
+            GazeModiffAdapter.scheduleTarget(listener.id, gazeTarget == null ? null : gazeTarget.id, start);
             System.out.println("GMIT_GAZE target actor=" + listener.id + " speaker=" + activeSpeaker
                     + " role=" + (listener == target ? "speaker" : "listener")
                     + " node=" + invoke((gazeTarget == null ? target : gazeTarget).head, "getIdentifier") + " world=" + vector(gazeTarget == null ? destination : gazeTarget.headWorld())
@@ -149,6 +150,7 @@ public final class ListenerGaze {
         // The preceding-frame origin makes the first nonzero value occur at midpointFrame.
         speakerActor.shift(midpointFrame - 1, gazeAngles(speakerActor, peer), MIDPOINT_TRANSITION_FRAMES);
         speakerActor.publishTransition(midpointFrame - 1, endFrame);
+        GazeModiffAdapter.scheduleTarget(speakerId, peerId, midpointFrame);
     }
 
     private static double[] gazeAngles(Actor viewer, Actor gazeTarget) throws Exception {
@@ -303,6 +305,7 @@ public final class ListenerGaze {
                 invoke(copy, "setMaskAndValue", fap("yaw_" + side + "_eyeball"), true, (int)Math.round(angles[2] * 100000));
                 invoke(copy, "setMaskAndValue", fap("pitch_" + side + "_eyeball"), true, (int)Math.round(angles[3] * 100000));
             }
+            GazeModiffAdapter.applyFace(id, copy);
             return copy;
         }
         void publishTransition(int now, int end) throws Exception {

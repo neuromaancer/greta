@@ -134,6 +134,16 @@ private runtime data or credentials. For instruction/documentation maintenance
 or Git publication alone, check syntax, links, and actual diffs; do not rerun
 GUI, speech, or models solely for those changes.
 
+The explicitly authorized MODIFF-VQ extension is an opt-in, facilitator-only
+engineering experiment, documented in `docs/gmit/MODIFF_VQ.md`. Ordinary replay
+keeps it disabled. Use the existing local checkpoint bundle with strict CPU
+loading; do not start the legacy camera/microphone/VAP launchers. Its gaze-selected
+virtual patient AU history is an unvalidated proxy for human OpenFace input.
+Keep per-patient histories separate, reject stale target responses, and limit
+output to facilitator eyebrow channels while preserving lips, blink, gaze,
+and seated pose. Model readiness and routing do not establish perceptual or
+scientific validity. Do not add patient expression fixtures to ordinary replay.
+
 ## Agent responsibilities
 
 Run at most two implementation workers concurrently:

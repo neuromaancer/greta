@@ -196,7 +196,7 @@ three speaker-target states before exiting.
 
 ## Deployment and evidence
 
-The twelve-file allowlist includes the scenario, room XML, seated-pose and gaze helpers,
+The deployment allowlist includes the scenario, room XML, seated-pose and gaze helpers,
 launcher, probe, original scene and BML examples, and local-output ignore file.
 Every listed file maps to the identical relative path in `greta_2.1`; the other
 P1 assets remain unchanged. Use `integrations/gmit/deploy.py` to preview and apply,

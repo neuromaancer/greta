@@ -1,6 +1,7 @@
 param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [switch]$DisableListenerGaze, [switch]$DisableTabletopArms,
+    [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
     [ValidateRange(0,15)][int]$EndHoldSeconds = 0
@@ -11,6 +12,15 @@ if ($modes.Count -gt 1) {
     throw 'Choose only one of -Smoke, -GroupMI, -Replay, or -Original.'
 }
 $automatic = $Smoke -or $GroupMI -or [bool]$Replay
+if ($ModiffDirectory) {
+    if ((-not ($GroupMI -or $Replay)) -or $DisableListenerGaze) {
+        throw 'MODIFF requires a seated GroupMI/Replay run with gaze enabled.'
+    }
+    if (-not [IO.Path]::IsPathRooted($ModiffDirectory)) { throw '-ModiffDirectory must be absolute.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $ModiffDirectory 'ready.json'))) {
+        throw 'The MODIFF worker is not ready. Use integrations/gmit/Start-GMIT-Modiff.ps1.'
+    }
+}
 if ($Preview -and -not $GroupMI) { throw '-Preview requires -GroupMI and renders the seated scene without speech.' }
 if ($GroupMI) {
     # Give observers time to locate the avatars and read each caption.
@@ -75,7 +85,7 @@ Push-Location $bin
 $process = $null
 try {
     if ($automatic) {
-        $compileArgs = @('-encoding', 'UTF-8', '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'ListenerGaze.java') + '"'))
+        $compileArgs = @('-encoding', 'UTF-8', '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'ListenerGaze.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'GazeModiffAdapter.java') + '"'))
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -96,11 +106,13 @@ try {
         if ($Preview) { $arguments = @('-Dgmit.preview=true') + $arguments }
         if ($DisableListenerGaze) { $arguments = @('-Dgmit.gaze.enabled=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
+        if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }
     Write-Output ('GMIT run directory: ' + $run)
-    if ($GroupMI) { Write-Output ('Synthetic authored group MI demo: ' + $turnCount + ' turns; no live GMIT or model generation.') }
-    if ($Replay) { Write-Output ('Offline recorded replay: ' + $turnCount + ' chunks; no live GMIT or model generation.') }
+    if ($GroupMI) { Write-Output ('Synthetic authored group MI demo: ' + $turnCount + ' turns; no live GMIT or dialogue generation.') }
+    if ($Replay) { Write-Output ('Offline recorded replay: ' + $turnCount + ' chunks; no live GMIT or dialogue generation.') }
+    if ($ModiffDirectory) { Write-Output 'Experimental facilitator eyebrow adaptation uses the external local MODIFF worker.' }
     $process = Start-Process -FilePath $java -ArgumentList $arguments -WorkingDirectory $bin -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError (Join-Path $run 'stderr.log') -PassThru
     $null = $process.Handle
     if ($automatic) {
