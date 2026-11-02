@@ -120,9 +120,9 @@ Existing NetBeans profiles compile the additional helper but do not start a
 model. A manually supplied `gmit.modiff.dir` is forwarded to the child process;
 that advanced path requires a ready worker and has separate acceptance needs.
 
-Add `-MeaningMiner` to this wrapper for the separately controlled facilitator
-hand-gesture layer. It uses original utterance text and leaves MODIFF's eyebrow
-ownership intact. See [MEANING_MINER.md](MEANING_MINER.md) for its bounded mapping,
+Add `-MeaningMiner` to this wrapper for the separately controlled three-actor
+semantic gesture layer. It uses original utterance text and leaves MODIFF's
+facilitator-only eyebrow ownership intact. See [MEANING_MINER.md](MEANING_MINER.md) for its seated adaptation,
 startup, and combined replay acceptance.
 
 ## Transport, deployment, and evidence

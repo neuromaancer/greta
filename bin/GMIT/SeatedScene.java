@@ -73,33 +73,53 @@ public final class SeatedScene {
         installed = false;
     }
 
-    /** Schedules a facilitator-only arm overlay from actual Audio Timer timestamps. */
-    public static synchronized boolean scheduleMeaningGesture(String eventId, List<String> schemas,
-                                                               long audioStartMillis, long audioEndMillis) throws Exception {
-        if (!MEANING_GESTURES || !ARMS || !installed) return false;
-        if (audioEndMillis <= audioStartMillis || audioEndMillis - audioStartMillis > 15000) return false;
-        PoseController facilitator = null;
-        for (PoseController controller : CONTROLLERS) if ("facilitator".equals(controller.actor)) facilitator = controller;
-        if (facilitator == null) throw new IllegalStateException("Facilitator tabletop pose is unavailable");
-        int start = Math.max(facilitator.currentFrame() + 2, frameAtOrAfter(audioStartMillis));
-        MeaningGesture.Plan plan = MeaningGesture.create(eventId, schemas, start, frameAtOrAfter(audioEndMillis));
-        if (plan == null) return false;
-        facilitator.scheduleMeaningGesture(plan);
-        System.out.println("GMIT_MEANING_GESTURE scheduled event=" + plan.eventId + " schema=" + plan.schema
-                + " start_frame=" + plan.startFrame + " finish_frame=" + plan.finishFrame);
-        return true;
+    /**
+     * Opens capture for one selected Planner/MeaningMiner gesture realization.
+     * The bridge calls this before the actor Realizer emits its body BAP frames.
+     */
+    public static synchronized void beginMeaningTurn(String actor, String eventId) throws Exception {
+        if (!MEANING_GESTURES || !ARMS || !installed) return;
+        controller(actor).beginMeaningTurn(eventId);
     }
 
-    /** Records the actual facilitator arm frame while an opt-in gesture is due. */
+    /**
+     * Binds already-captured raw BAP frames to the actual Audio callback.  This
+     * does not retime generated gestures or word timing; it only supplies the
+     * end bound for the seated return-to-clasp envelope.
+     */
+    public static synchronized void bindMeaningTurn(String actor, String eventId,
+                                                     long audioStartMillis, long audioEndMillis) throws Exception {
+        if (!MEANING_GESTURES || !ARMS || !installed) return;
+        controller(actor).bindMeaningTurn(eventId, audioStartMillis, audioEndMillis);
+    }
+
+    /**
+     * Returns the current bound return-to-clasp deadline in Greta Timer
+     * milliseconds, or zero when this event did not select a stock gesture.
+     * The playback loop may query repeatedly because late queued BAP frames can
+     * legitimately extend the captured gesture tail.
+     */
+    public static synchronized long meaningRestoreMillis(String actor, String eventId) {
+        if (!MEANING_GESTURES || !ARMS || !installed || !isKnownActor(actor)) return 0;
+        return controller(actor).meaningRestoreMillis(eventId);
+    }
+
+    /** Releases a completed selected turn so later speech-only turns cannot inherit it. */
+    public static synchronized void finishMeaningTurn(String actor, String eventId) throws Exception {
+        if (!MEANING_GESTURES || !ARMS || !installed) return;
+        controller(actor).finishMeaningTurn(eventId);
+    }
+
+    /** Records actual per-actor stock BAP movement and the eventual clasp restoration. */
     public static synchronized void observeMeaningGesture() throws Exception {
         if (!MEANING_GESTURES || !installed) return;
-        for (PoseController controller : CONTROLLERS) if ("facilitator".equals(controller.actor)) controller.observeMeaningGesture();
+        for (PoseController controller : CONTROLLERS) controller.observeMeaningGesture();
     }
 
-    private static int frameAtOrAfter(long millis) {
-        if (millis < 0 || millis > Integer.MAX_VALUE * (long)MeaningGesture.FRAME_MILLIS)
-            throw new IllegalArgumentException("Out-of-range Greta Timer time: " + millis);
-        return (int)((millis + MeaningGesture.FRAME_MILLIS - 1) / MeaningGesture.FRAME_MILLIS);
+    private static PoseController controller(String actor) {
+        if (!isKnownActor(actor)) throw new IllegalArgumentException("Unknown GMIT actor: " + actor);
+        for (PoseController controller : CONTROLLERS) if (actor.equals(controller.actor)) return controller;
+        throw new IllegalStateException("Seated actor is unavailable: " + actor);
     }
 
     private static Object require(Map<String, Object> objects, String id) {
@@ -310,9 +330,10 @@ public final class SeatedScene {
     private static final class PoseController {
         private final String actor; private final PoseSpec pose; private final Object avatar, body; private final ClassLoader loader;
         private Object proxy;
-        private volatile MeaningGesture.Plan meaningGesture;
-        private String observedMeaningEvent;
-        private boolean observedMeaningPeak, observedMeaningRestored;
+        private volatile MeaningGesture.Turn meaningTurn;
+        private boolean observedMeaningMovement, observedMeaningRestored;
+        private boolean observedMeaningBodyMaskFilter;
+        private boolean observedMeaningPending;
 
         PoseController(String actor, PoseSpec pose, Object avatar, Object body) {
             this.actor = actor; this.pose = pose; this.avatar = avatar; this.body = body; this.loader = avatar.getClass().getClassLoader();
@@ -358,9 +379,25 @@ public final class SeatedScene {
             List<Object> frames = new ArrayList<Object>(); frames.add(constructor.newInstance(number)); return frames;
         }
 
-        private Object forward(List<?> source, Object id) throws Exception {
+        private synchronized Object forward(List<?> source, Object id) throws Exception {
+            // Capture the whole Realizer batch before deriving any seated frame.
+            // The BAP callback races SmokeProbe on a different thread; keeping
+            // capture, adaptation, and avatar submission under one controller
+            // lock prevents a partially captured turn from being observed.
+            for (Object frame : source) captureMeaningArms(frame);
+            MeaningGesture.Turn turn = meaningTurn;
+            // Refresh all not-yet-current arm frames after every complete raw
+            // batch. APFrameList blends same-frame masked channels with the
+            // later submission, so this atomically replaces stale projected
+            // return values without cancelling unrelated gaze frames.
+            if (turn != null && turn.isBound() && turn.hasRawFrames())
+                replayCapturedArms(turn);
             List<Object> overlaid = new ArrayList<Object>();
-            for (Object frame : source) { Object copy = frame.getClass().getMethod("clone").invoke(frame); overlay(copy); ListenerGaze.applyBody(actor, copy); overlaid.add(copy); }
+            for (Object frame : source) {
+                Object copy = frame.getClass().getMethod("clone").invoke(frame);
+                clearMeaningBodyChannels(copy);
+                overlay(copy); ListenerGaze.applyBody(actor, copy); overlaid.add(copy);
+            }
             return SeatedScene.invoke(avatar, "performBAPFrames", overlaid, id);
         }
 
@@ -369,46 +406,76 @@ public final class SeatedScene {
             return ((Number)timerClass.getMethod("getCurrentFrameNumber").invoke(null)).intValue();
         }
 
-        synchronized void scheduleMeaningGesture(MeaningGesture.Plan plan) throws Exception {
-            if (!"facilitator".equals(actor)) throw new IllegalStateException("Meaning gesture must belong to facilitator");
-            meaningGesture = plan;
-            observedMeaningEvent = plan.eventId;
-            observedMeaningPeak = false;
+        synchronized void beginMeaningTurn(String eventId) {
+            if (meaningTurn != null && !meaningTurn.restoredAt(safeCurrentFrame()))
+                throw new IllegalStateException("Meaning gesture is already active for " + actor);
+            meaningTurn = new MeaningGesture.Turn(actor, eventId, seatedGestureGain());
+            observedMeaningMovement = false;
             observedMeaningRestored = false;
-            Class<?> frameClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPFrame");
-            Constructor<?> constructor = frameClass.getConstructor(Integer.TYPE);
-            List<Object> frames = new ArrayList<Object>();
-            for (int frame = plan.startFrame; frame <= plan.finishFrame; frame++) {
-                Object output = constructor.newInstance(frame);
-                applyMeaningArms(output, plan);
-                frames.add(output);
-            }
-            // Arm-only masks cover already queued body frames without replacing
-            // legs, root placement, neck, face, or the other two actors.
-            invoke(avatar, "performBAPFrames", frames, newID());
+            observedMeaningBodyMaskFilter = false;
+            observedMeaningPending = false;
+            System.out.println("GMIT_MEANING_GESTURE capture_begin actor=" + actor + " event=" + eventId);
+        }
+
+        synchronized void bindMeaningTurn(String eventId, long audioStartMillis, long audioEndMillis) {
+            MeaningGesture.Turn turn = meaningTurn;
+            // MeaningMiner can legitimately return only speech. The bridge
+            // binds every MM turn after Audio, but only a selected gesture has
+            // called beginMeaningTurn and therefore owns an arm capture.
+            if (turn == null || !turn.eventId.equals(eventId)) return;
+            turn.bind(audioStartMillis, audioEndMillis);
+            try { replayCapturedArms(turn); }
+            catch (Exception failure) { throw new IllegalStateException("Cannot replay seated MeaningMiner arm frames", failure); }
+            System.out.println("GMIT_MEANING_GESTURE bound actor=" + actor + " event=" + eventId
+                    + " raw_frames=" + turn.rawFrameCount() + " first_frame=" + turn.firstRawFrame()
+                    + " last_frame=" + turn.lastRawFrame() + " audio_end_frame=" + MeaningGesture.frameAtOrAfter(audioEndMillis));
         }
 
         synchronized void observeMeaningGesture() throws Exception {
-            MeaningGesture.Plan plan = meaningGesture;
-            if (plan == null) return;
-            int frameNumber = currentFrame();
-            Object frame = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
-            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
-            if (plan.covers(frameNumber) && !observedMeaningPeak && plan.weight(frameNumber) >= .9) {
-                assertMeaningArms(frame, types, plan);
-                System.out.println("GMIT_MEANING_GESTURE observed event=" + plan.eventId + " schema=" + plan.schema
-                        + " frame=" + frameNumber + " weight=" + plan.weight(frameNumber)
-                        + " right_shoulder_flexion_deg=" + degree(frame, types, "r_shoulder_flexion"));
-                observedMeaningPeak = true;
+            MeaningGesture.Turn turn = meaningTurn;
+            if (turn == null || !turn.isBound()) return;
+            Object current = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
+            Object frame = current.getClass().getMethod("clone").invoke(current);
+            int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
+            if (turn.activeAt(frameNumber) && !observedMeaningMovement) {
+                Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+                double left = degree(frame, types, "l_shoulder_flexion");
+                double right = degree(frame, types, "r_shoulder_flexion");
+                if (Math.abs(left - arm("l_shoulder_flexion", pose.lShoulderFlexion)) > .5
+                        || Math.abs(right - arm("r_shoulder_flexion", pose.rShoulderFlexion)) > .5) {
+                    System.out.println("GMIT_MEANING_GESTURE observed actor=" + actor + " event=" + turn.eventId
+                            + " frame=" + frameNumber + " left_shoulder_flexion_deg=" + left
+                            + " right_shoulder_flexion_deg=" + right);
+                    observedMeaningMovement = true;
+                }
             }
-            if (plan.expired(frameNumber) && !observedMeaningRestored) {
-                assertArm(frame, types, "r_shoulder_flexion", arm("r_shoulder_flexion", pose.rShoulderFlexion));
-                assertArm(frame, types, "r_elbow_flexion", arm("r_elbow_flexion", pose.rElbowFlexion));
-                for (Map.Entry<String, Double> override : pose.armOverrides.entrySet())
-                    if (rightFinger(override.getKey())) assertArm(frame, types, override.getKey(), override.getValue().doubleValue());
-                System.out.println("GMIT_MEANING_GESTURE restored event=" + plan.eventId + " frame=" + frameNumber);
+            if (turn.restoredAt(frameNumber) && !observedMeaningRestored) {
+                Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+                for (String joint : ARM_JOINTS) assertArm(frame, types, joint, armBase(joint));
+                System.out.println("GMIT_MEANING_GESTURE restored actor=" + actor + " event=" + turn.eventId + " frame=" + frameNumber);
                 observedMeaningRestored = true;
             }
+        }
+
+        synchronized long meaningRestoreMillis(String eventId) {
+            MeaningGesture.Turn turn = meaningTurn;
+            if (turn == null || !turn.eventId.equals(eventId) || !turn.isBound()) return 0;
+            int frame = turn.restoreEndFrame();
+            return frame < 0 ? 0 : frame * (long)MeaningGesture.FRAME_MILLIS;
+        }
+
+        synchronized void finishMeaningTurn(String eventId) throws Exception {
+            MeaningGesture.Turn turn = meaningTurn;
+            if (turn == null || !turn.eventId.equals(eventId)) return;
+            int frameNumber = currentFrame();
+            if (!turn.restoredAt(frameNumber))
+                throw new IllegalStateException("Meaning turn cannot finish before restoration actor=" + actor + " event=" + eventId);
+            Object current = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
+            Object frame = current.getClass().getMethod("clone").invoke(current);
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            for (String joint : ARM_JOINTS) assertArm(frame, types, joint, armBase(joint));
+            meaningTurn = null;
+            System.out.println("GMIT_MEANING_GESTURE finished actor=" + actor + " event=" + eventId + " frame=" + frameNumber);
         }
 
         private void overlay(Object frame) throws Exception {
@@ -417,29 +484,43 @@ public final class SeatedScene {
             setDegrees(frame, typeClass, "l_hip_flexion", pose.hip); setDegrees(frame, typeClass, "r_hip_flexion", pose.hip);
             setDegrees(frame, typeClass, "l_knee_flexion", pose.knee); setDegrees(frame, typeClass, "r_knee_flexion", pose.knee);
             setDegrees(frame, typeClass, "l_ankle_flexion", pose.ankle); setDegrees(frame, typeClass, "r_ankle_flexion", pose.ankle);
-            if (ARMS) {
-            setDegrees(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion); setDegrees(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
-            setDegrees(frame, typeClass, "l_shoulder_abduct", pose.lShoulderAbduct); setDegrees(frame, typeClass, "r_shoulder_abduct", pose.rShoulderAbduct);
-            setDegrees(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion); setDegrees(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
-            setDegrees(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting); setDegrees(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
-            setDegrees(frame, typeClass, "l_wrist_flexion", pose.lWristFlexion); setDegrees(frame, typeClass, "r_wrist_flexion", pose.rWristFlexion);
-            setDegrees(frame, typeClass, "l_wrist_pivot", pose.lWristPivot); setDegrees(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
-            setDegrees(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting); setDegrees(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
-            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) setDegrees(frame, typeClass, override.getKey(), override.getValue().doubleValue());
-            MeaningGesture.Plan plan = meaningGesture;
-            // Incoming body batches can contain future frames.  Keep the plan
-            // immutable and apply zero weight outside its interval rather than
-            // clearing it from an unrelated queued frame.
-            if ("facilitator".equals(actor) && plan != null) applyMeaningArms(frame, plan);
-            }
+            if (ARMS) applySeatedArms(frame, typeClass);
             setValue(frame, typeClass, "HumanoidRoot_tr_lateral", (int)Math.round(pose.x * 1000.0));
             setValue(frame, typeClass, "HumanoidRoot_tr_vertical", (int)Math.round(pose.vertical));
             setValue(frame, typeClass, "HumanoidRoot_tr_frontal", (int)Math.round(pose.z * 1000.0));
             setDegrees(frame, typeClass, "HumanoidRoot_rt_body_turn", pose.yaw);
         }
 
-        void verify() throws Exception {
-            Object frame = SeatedScene.invoke(avatar, "getCurrentBAPFrame"); Class<?> typeClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+        /**
+         * Stock lexicon gestures are usually authored for a standing avatar.
+         * While a selected MeaningMiner turn owns this actor, retain only its
+         * arm/finger BAP source masks. SeatedScene regenerates root and legs,
+         * and ListenerGaze owns cervical channels after this filter.
+         */
+        private void clearMeaningBodyChannels(Object frame) throws Exception {
+            if (meaningTurn == null) return; // exact non-MM behavior remains unchanged.
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            Object[] all = types.getEnumConstants();
+            int removed = 0;
+            for (Object channel : all) {
+                String name = ((Enum<?>)channel).name();
+                if (!ARM_JOINTS.contains(name) && ((Boolean)invoke(frame, "getMask", channel)).booleanValue()) {
+                    invoke(frame, "setMask", channel, Boolean.FALSE); removed++;
+                }
+            }
+            if (removed > 0 && !observedMeaningBodyMaskFilter) {
+                System.out.println("GMIT_MEANING_GESTURE body_mask_filter actor=" + actor + " event=" + meaningTurn.eventId + " removed=" + removed);
+                observedMeaningBodyMaskFilter = true;
+            }
+        }
+
+        synchronized void verify() throws Exception {
+            // APFrameList mutates its current frame on the render/timer path.
+            // Clone immediately so all checks use one consistent frame number
+            // and channel snapshot.
+            Object current = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
+            Object frame = current.getClass().getMethod("clone").invoke(current);
+            Class<?> typeClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
             assertMask(frame, typeClass, "l_hip_flexion"); assertMask(frame, typeClass, "r_hip_flexion");
             assertMask(frame, typeClass, "l_knee_flexion"); assertMask(frame, typeClass, "r_knee_flexion");
             assertMask(frame, typeClass, "HumanoidRoot_tr_lateral"); assertMask(frame, typeClass, "HumanoidRoot_tr_frontal"); assertMask(frame, typeClass, "HumanoidRoot_tr_vertical");
@@ -449,21 +530,32 @@ public final class SeatedScene {
             assertMask(frame, typeClass, "l_ankle_flexion"); assertDegrees(frame, typeClass, "l_ankle_flexion", pose.ankle);
             assertMask(frame, typeClass, "r_ankle_flexion"); assertDegrees(frame, typeClass, "r_ankle_flexion", pose.ankle);
             if (ARMS) {
-            assertArm(frame, typeClass, "l_shoulder_flexion", pose.lShoulderFlexion);
-            assertArm(frame, typeClass, "l_elbow_flexion", pose.lElbowFlexion);
-            assertArm(frame, typeClass, "l_elbow_twisting", pose.lElbowTwisting);
-            assertArm(frame, typeClass, "l_wrist_pivot", pose.lWristPivot);
-            assertArm(frame, typeClass, "l_wrist_twisting", pose.lWristTwisting);
-            MeaningGesture.Plan plan = meaningGesture;
             int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
-            if ("facilitator".equals(actor) && plan != null && plan.covers(frameNumber)) assertMeaningArms(frame, typeClass, plan);
-            else {
-                assertArm(frame, typeClass, "r_shoulder_flexion", pose.rShoulderFlexion);
-                assertArm(frame, typeClass, "r_elbow_flexion", pose.rElbowFlexion);
-                assertArm(frame, typeClass, "r_elbow_twisting", pose.rElbowTwisting);
-                assertArm(frame, typeClass, "r_wrist_pivot", pose.rWristPivot);
-                assertArm(frame, typeClass, "r_wrist_twisting", pose.rWristTwisting);
-                for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) assertArm(frame, typeClass, override.getKey(), override.getValue().doubleValue());
+            MeaningGesture.Turn turn = meaningTurn;
+            if (turn == null || !turn.activeAt(frameNumber)) {
+                assertStaticArms(frame, typeClass);
+            } else {
+                // Compare against the exact arm frame emitted to the avatar,
+                // not the mutable raw capture: another partial BAP batch can
+                // arrive after this frame has already been queued.
+                int firstEmitted = turn.firstEmittedFrame();
+                if (firstEmitted < 0 || frameNumber < firstEmitted) {
+                    // Raw BAP has been captured, but no arm frame for this
+                    // timer instant has been submitted. The accepted clasp is
+                    // therefore the only valid expected state, not a guess
+                    // from a future mutable gesture plan.
+                    assertStaticArms(frame, typeClass);
+                    if (!observedMeaningPending) {
+                        System.out.println("GMIT_MEANING_GESTURE pending actor=" + actor + " event=" + turn.eventId
+                                + " raw_first=" + turn.firstRawFrame() + " current=" + frameNumber + " first_submitted=" + firstEmitted);
+                        observedMeaningPending = true;
+                    }
+                } else for (String joint : ARM_JOINTS) {
+                    assertMask(frame, typeClass, joint);
+                    Double emitted = turn.emittedValueAt(joint, frameNumber);
+                    if (emitted == null) throw new IllegalStateException("Missing emitted Meaning arm frame actor=" + actor + " channel=" + joint + " frame=" + frameNumber);
+                    assertDegrees(frame, typeClass, joint, emitted.doubleValue());
+                }
             }
             }
             assertMask(frame, typeClass, "HumanoidRoot_rt_body_turn"); assertDegrees(frame, typeClass, "HumanoidRoot_rt_body_turn", pose.yaw);
@@ -474,42 +566,116 @@ public final class SeatedScene {
         }
 
         private Object newID() throws Exception { return loader.loadClass("greta.core.util.id.IDProvider").getMethod("createID", String.class).invoke(null, "gmit-seated-" + actor); }
-        private void applyMeaningArms(Object frame, MeaningGesture.Plan plan) throws Exception {
-            double weight = plan.weight(((Number)invoke(frame, "getFrameNumber")).intValue());
-            Class<?> typeClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
-            MeaningGesture.Profile profile = plan.profile;
-            setDegrees(frame, typeClass, "r_shoulder_flexion", arm("r_shoulder_flexion", pose.rShoulderFlexion) + profile.shoulderFlexion * weight);
-            setDegrees(frame, typeClass, "r_shoulder_abduct", arm("r_shoulder_abduct", pose.rShoulderAbduct) + profile.shoulderAbduct * weight);
-            setDegrees(frame, typeClass, "r_elbow_flexion", arm("r_elbow_flexion", pose.rElbowFlexion) + profile.elbowFlexion * weight);
-            setDegrees(frame, typeClass, "r_elbow_twisting", arm("r_elbow_twisting", pose.rElbowTwisting) + profile.elbowTwisting * weight);
-            setDegrees(frame, typeClass, "r_wrist_flexion", arm("r_wrist_flexion", pose.rWristFlexion) + profile.wristFlexion * weight);
-            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) {
-                String name = override.getKey();
-                if (rightFinger(name)) setDegrees(frame, typeClass, name,
-                        override.getValue().doubleValue() * (1 - profile.release * weight));
+        private void applySeatedArms(Object frame, Class<?> types) throws Exception {
+            int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
+            MeaningGesture.Turn turn = meaningTurn;
+            // Preserve the accepted non-MM clasp exactly: its original fixed
+            // channels plus explicit room XML overrides, not a newly masked
+            // universe of finger channels.
+            if (turn == null || !turn.activeAt(frameNumber)) { applyStaticArms(frame, types); return; }
+            Map<String, Double> emitted = new LinkedHashMap<String, Double>();
+            for (String joint : ARM_JOINTS) {
+                double value = turn.hasValueAt(joint, frameNumber) ? turn.valueAt(joint, frameNumber, armBase(joint)) : armBase(joint);
+                setDegrees(frame, types, joint, value); emitted.put(joint, Double.valueOf(value));
             }
+            turn.recordEmitted(frameNumber, emitted);
+        }
+        private void applyStaticArms(Object frame, Class<?> types) throws Exception {
+            setDegrees(frame, types, "l_shoulder_flexion", pose.lShoulderFlexion); setDegrees(frame, types, "r_shoulder_flexion", pose.rShoulderFlexion);
+            setDegrees(frame, types, "l_shoulder_abduct", pose.lShoulderAbduct); setDegrees(frame, types, "r_shoulder_abduct", pose.rShoulderAbduct);
+            setDegrees(frame, types, "l_elbow_flexion", pose.lElbowFlexion); setDegrees(frame, types, "r_elbow_flexion", pose.rElbowFlexion);
+            setDegrees(frame, types, "l_elbow_twisting", pose.lElbowTwisting); setDegrees(frame, types, "r_elbow_twisting", pose.rElbowTwisting);
+            setDegrees(frame, types, "l_wrist_flexion", pose.lWristFlexion); setDegrees(frame, types, "r_wrist_flexion", pose.rWristFlexion);
+            setDegrees(frame, types, "l_wrist_pivot", pose.lWristPivot); setDegrees(frame, types, "r_wrist_pivot", pose.rWristPivot);
+            setDegrees(frame, types, "l_wrist_twisting", pose.lWristTwisting); setDegrees(frame, types, "r_wrist_twisting", pose.rWristTwisting);
+            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) setDegrees(frame, types, override.getKey(), override.getValue().doubleValue());
+        }
+        private void assertStaticArms(Object frame, Class<?> types) throws Exception {
+            assertArm(frame, types, "l_shoulder_flexion", pose.lShoulderFlexion);
+            assertArm(frame, types, "l_elbow_flexion", pose.lElbowFlexion);
+            assertArm(frame, types, "l_elbow_twisting", pose.lElbowTwisting);
+            assertArm(frame, types, "l_wrist_pivot", pose.lWristPivot);
+            assertArm(frame, types, "l_wrist_twisting", pose.lWristTwisting);
+            assertArm(frame, types, "r_shoulder_flexion", pose.rShoulderFlexion);
+            assertArm(frame, types, "r_elbow_flexion", pose.rElbowFlexion);
+            assertArm(frame, types, "r_elbow_twisting", pose.rElbowTwisting);
+            assertArm(frame, types, "r_wrist_pivot", pose.rWristPivot);
+            assertArm(frame, types, "r_wrist_twisting", pose.rWristTwisting);
+            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) assertArm(frame, types, override.getKey(), override.getValue().doubleValue());
+        }
+        private void captureMeaningArms(Object frame) throws Exception {
+            MeaningGesture.Turn turn = meaningTurn;
+            if (turn == null) return;
+            int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            Map<String, Double> captured = new LinkedHashMap<String, Double>();
+            for (String joint : ARM_JOINTS) {
+                Object jointType = type(types, joint);
+                if (((Boolean)invoke(frame, "getMask", jointType)).booleanValue())
+                    captured.put(joint, Double.valueOf(degree(frame, types, joint)));
+            }
+            turn.capture(frameNumber, captured);
+        }
+        /**
+         * Body BAP normally arrives before the Audio callback.  It was already
+         * forwarded with the seated clasp, so replay only its filtered arm
+         * channels after binding.  The later arm-only batch cannot overwrite
+         * root, legs, neck/gaze, face, lips, or blink frames.
+         */
+        private void replayCapturedArms(MeaningGesture.Turn turn) throws Exception {
+            if (!turn.hasRawFrames()) return;
+            int from = turn.replayStartFrame(currentFrame());
+            int to = turn.restoreEndFrame();
+            if (from < 0 || to < from) return;
+            if (to - from > 520) throw new IllegalStateException("Meaning arm replay exceeds bounded frame range");
+            Class<?> frameClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPFrame");
+            Constructor<?> constructor = frameClass.getConstructor(Integer.TYPE);
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            List<Object> output = new ArrayList<Object>();
+            for (int number = from; number <= to; number++) {
+                Object armFrame = constructor.newInstance(number);
+                Map<String, Double> emitted = new LinkedHashMap<String, Double>();
+                for (String joint : ARM_JOINTS) {
+                    double base = armBase(joint);
+                    double value = turn.valueAt(joint, number, base);
+                    setDegrees(armFrame, types, joint, value); emitted.put(joint, Double.valueOf(value));
+                }
+                turn.recordEmitted(number, emitted);
+                output.add(armFrame);
+            }
+            invoke(avatar, "performBAPFrames", output, newID());
+        }
+        private int safeCurrentFrame() {
+            try { return currentFrame(); }
+            catch (Exception ignored) { return Integer.MAX_VALUE; }
+        }
+        private double seatedGestureGain() {
+            // Standing-stock shoulder/elbow deltas need a conservative seated
+            // retarget. Wrist/finger handshapes remain unscaled in Turn.
+            String value = System.getProperty("gmit.meaningminer.seated_arm_gain", "0.35");
+            try { return Double.parseDouble(value); }
+            catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid gmit.meaningminer.seated_arm_gain", invalid); }
+        }
+        private double armBase(String name) {
+            if ("l_shoulder_flexion".equals(name)) return arm(name, pose.lShoulderFlexion);
+            if ("r_shoulder_flexion".equals(name)) return arm(name, pose.rShoulderFlexion);
+            if ("l_shoulder_abduct".equals(name)) return arm(name, pose.lShoulderAbduct);
+            if ("r_shoulder_abduct".equals(name)) return arm(name, pose.rShoulderAbduct);
+            if ("l_elbow_flexion".equals(name)) return arm(name, pose.lElbowFlexion);
+            if ("r_elbow_flexion".equals(name)) return arm(name, pose.rElbowFlexion);
+            if ("l_elbow_twisting".equals(name)) return arm(name, pose.lElbowTwisting);
+            if ("r_elbow_twisting".equals(name)) return arm(name, pose.rElbowTwisting);
+            if ("l_wrist_flexion".equals(name)) return arm(name, pose.lWristFlexion);
+            if ("r_wrist_flexion".equals(name)) return arm(name, pose.rWristFlexion);
+            if ("l_wrist_pivot".equals(name)) return arm(name, pose.lWristPivot);
+            if ("r_wrist_pivot".equals(name)) return arm(name, pose.rWristPivot);
+            if ("l_wrist_twisting".equals(name)) return arm(name, pose.lWristTwisting);
+            if ("r_wrist_twisting".equals(name)) return arm(name, pose.rWristTwisting);
+            return arm(name, 0);
         }
         private double arm(String name, double fallback) { return pose.arm(name, fallback); }
         private double degree(Object frame, Class<?> types, String name) throws Exception {
             return ((Number)SeatedScene.invoke(frame, "getDegreeValue", type(types, name))).doubleValue();
-        }
-        private static boolean rightFinger(String name) {
-            return name.startsWith("r_thumb") || name.startsWith("r_index") || name.startsWith("r_middle")
-                    || name.startsWith("r_ring") || name.startsWith("r_pinky");
-        }
-        private void assertMeaningArms(Object frame, Class<?> types, MeaningGesture.Plan plan) throws Exception {
-            double weight = plan.weight(((Number)invoke(frame, "getFrameNumber")).intValue());
-            MeaningGesture.Profile profile = plan.profile;
-            assertDegrees(frame, types, "r_shoulder_flexion", arm("r_shoulder_flexion", pose.rShoulderFlexion) + profile.shoulderFlexion * weight);
-            assertDegrees(frame, types, "r_shoulder_abduct", arm("r_shoulder_abduct", pose.rShoulderAbduct) + profile.shoulderAbduct * weight);
-            assertDegrees(frame, types, "r_elbow_flexion", arm("r_elbow_flexion", pose.rElbowFlexion) + profile.elbowFlexion * weight);
-            assertDegrees(frame, types, "r_elbow_twisting", arm("r_elbow_twisting", pose.rElbowTwisting) + profile.elbowTwisting * weight);
-            assertDegrees(frame, types, "r_wrist_flexion", arm("r_wrist_flexion", pose.rWristFlexion) + profile.wristFlexion * weight);
-            for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) {
-                if (rightFinger(override.getKey())) assertDegrees(frame, types, override.getKey(),
-                        override.getValue().doubleValue() * (1 - profile.release * weight));
-                else assertArm(frame, types, override.getKey(), override.getValue().doubleValue());
-            }
         }
         @SuppressWarnings({"unchecked", "rawtypes"}) private static Object type(Class<?> types, String name) { return Enum.valueOf((Class<Enum>)types.asSubclass(Enum.class), name); }
         private static void setDegrees(Object frame, Class<?> types, String name, double value) throws Exception { SeatedScene.invoke(frame, "setDegreeValue", type(types, name), value); }

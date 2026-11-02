@@ -24,10 +24,12 @@ local CPU preflight and a gaze-selected virtual-AU bridge. It is separate from
 the accepted ordinary replay configuration. See [MODIFF_VQ.md](MODIFF_VQ.md)
 for the input approximations, startup, and verification limits.
 
-The opt-in [MeaningMiner extension](MEANING_MINER.md) extracts English semantic
-markers from facilitator text and selects a bounded tabletop hand gesture.
-It preserves the single speech route and blends back to the calibrated clasp.
-Ordinary replay leaves it disabled; Pure/RL decisions are unaffected.
+The opt-in [MeaningMiner extension](MEANING_MINER.md) sends each of the three
+actors' English semantic intentions through its own Planner and gesture lexicon.
+It preserves the single speech route, realizes original library arm/finger
+motions, and blends back to the calibrated seated clasp. Ordinary replay leaves
+it disabled; Pure/RL decisions are unaffected. Its verification record separates
+library availability, actual selected gestures, and human visual acceptance.
 
 ## Baseline and ownership
 

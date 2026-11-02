@@ -3,6 +3,7 @@ param(
     [string]$Replay,
     [switch]$Preview,
     [switch]$MeaningMiner,
+    [switch]$Muted,
     [string]$Distribution = 'Ubuntu',
     [string]$PythonPath = $env:GRETA_MODIFF_PYTHON,
     [string]$JavaHome,
@@ -41,6 +42,7 @@ try {
 if ($turnCount -lt 1 -or $turnCount -gt 256) { throw 'Expected a bounded replay with 1 to 256 chunks.' }
 $workerSeconds = 180 + $StartDelaySeconds + $EndHoldSeconds + $turnCount * (27 + $TurnGapSeconds)
 if ($Preview) { $workerSeconds = 240 }
+if ($MeaningMiner) { $workerSeconds += 90 + $turnCount * (30 + 6) }
 if ($workerSeconds -gt 3600) { throw 'This experimental mode supports a replay budget of at most one hour. Use a shorter replay.' }
 if (Get-Process java,javaw,Greta_No_Facial_expressions,Greta_Facial_expressions -ErrorAction SilentlyContinue) {
     throw 'Close the other Java/Greta instance before starting this bounded run.'
@@ -119,6 +121,7 @@ try {
     if ($Replay) { $launch.Replay = $Replay } else { $launch.GroupMI = $true }
     if ($Preview) { $launch.Preview = $true }
     if ($MeaningMiner) { $launch.MeaningMiner = $true }
+    if ($Muted) { $launch.Muted = $true }
     & $launcher @launch
     if (Test-Path -LiteralPath (Join-Path $run 'error.json')) {
         throw ('MODIFF failed; inspect ' + (Join-Path $run 'error.json'))

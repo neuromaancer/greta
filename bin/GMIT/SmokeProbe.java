@@ -23,7 +23,7 @@ import org.xml.sax.SAXException;
 public final class SmokeProbe {
     private static final Map<String, Object> objects = new LinkedHashMap<>();
     private static final Map<String, List<Object>> audio = new ConcurrentHashMap<>();
-    private static final Map<String, List<String>> meaningPlans = new HashMap<>();
+    private static final Set<String> meaningPlans = new HashSet<>();
     private static File output;
     private static Object captureTarget;
     private static volatile Throwable failure;
@@ -355,6 +355,11 @@ public final class SmokeProbe {
             return null;
         });
         add.invoke(performer, listener);
+        if (Boolean.getBoolean("gmit.audio.muted")) {
+            Object avatar = objects.get("gmit-" + actor + "-avatar");
+            call(performer, "removeAudioPerformer", new Class<?>[]{iface}, avatar);
+            log("audio_output_muted actor=" + actor + " synthesis_and_observation=true");
+        }
     }
     private static void playTurn(int ordinal, int total, String actor, String readerId, File bml,
                                  Map<String, Integer> expected, int turnGap, Caption caption, Turn scenarioTurn) throws Exception {
@@ -362,9 +367,12 @@ public final class SmokeProbe {
         if (caption != null) caption.checkCancelled();
         if (caption != null) caption.show(ordinal, total, scenarioTurn, activeProvenance);
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
-        log("dispatch sequence=" + ordinal + " actor=" + actor + " reader=" + readerId + " file=" + bml.getName());
+        boolean meaningTurn = scenarioTurn != null && meaningPlans.contains(scenarioTurn.eventId);
+        log("dispatch sequence=" + ordinal + " actor=" + actor + " route="
+                + (meaningTurn ? "meaningminer-planner" : "bml-reader") + " file=" + bml.getName());
         if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " source_event_id=" + scenarioTurn.sourceEventId + " source_turn=" + scenarioTurn.sourceTurn + " chunk=" + scenarioTurn.chunkIndex + "/" + scenarioTurn.chunkCount + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
-        call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
+        if (meaningTurn) MeaningMinerBridge.dispatch(actor, scenarioTurn.eventId);
+        else call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
         long until = System.currentTimeMillis() + 10000;
         Map<String, Integer> scheduled = new HashMap<>(expected);
         scheduled.put(actor, expected.get(actor) + 1);
@@ -385,19 +393,20 @@ public final class SmokeProbe {
         long end = ((Number)call(a,"getEndMillis")).longValue();
         String gazePeer = gazePeer(actor, ordinal);
         ListenerGaze.scheduleSpeech(actor, gazePeer, start, end);
-        boolean meaningGesture = scenarioTurn != null && "facilitator".equals(actor)
-                && meaningPlans.containsKey(scenarioTurn.eventId)
-                && SeatedScene.scheduleMeaningGesture(scenarioTurn.eventId,
-                        meaningPlans.get(scenarioTurn.eventId), start, end);
+        if (meaningTurn) SeatedScene.bindMeaningTurn(actor, scenarioTurn.eventId, start, end);
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         long engineNow = ((Number)clock.invoke(null)).longValue();
         long remaining = end-engineNow;
         if (remaining < 0 || remaining > 15000) throw new IllegalStateException("Unexpected audio schedule");
-        long stop = System.currentTimeMillis()+remaining+turnGap*1000L+2000;
+        long stop = System.currentTimeMillis()+remaining+turnGap*1000L+7000;
         int frame = 0;
         boolean capturedSpeakerShift = false;
-        boolean capturedMeaningGesture = false;
-        while (((Number)clock.invoke(null)).longValue()<end+turnGap*1000L) {
+        int meaningCapture = 0;
+        while (true) {
+            long restoreEnd = meaningTurn ? SeatedScene.meaningRestoreMillis(actor, scenarioTurn.eventId) : 0;
+            if (restoreEnd > end + 6000) throw new IllegalStateException("MeaningMiner return exceeds the bounded post-speech interval");
+            long observedEnd = Math.max(end + turnGap * 1000L, restoreEnd == 0 ? 0 : restoreEnd + 100);
+            if (((Number)clock.invoke(null)).longValue() >= observedEnd) break;
             if (caption != null) caption.checkCancelled();
             if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
             if (failure != null) throw new IllegalStateException("Playback thread failed", failure);
@@ -406,10 +415,9 @@ public final class SmokeProbe {
             if ("Synthetic authored dialogue".equals(activeProvenance)) capture(String.format("%02d-%s-%03d", ordinal, actor, frame++));
             else if ((ordinal <= 3 || ordinal == total || ordinal % 25 == 0) && frame++ == 0) capture(String.format("%03d-%s", ordinal, actor));
             if (scenarioTurn != null && frame == 12) capture(String.format("gaze-%03d-%s", ordinal, actor));
-            if (meaningGesture && !capturedMeaningGesture
-                    && ((Number)clock.invoke(null)).longValue() >= start + duration * 45 / 100) {
-                capture(String.format("meaning-%03d-%s", ordinal, actor));
-                capturedMeaningGesture = true;
+            if (meaningTurn && meaningCapture < 3
+                    && ((Number)clock.invoke(null)).longValue() >= start + duration * (25 + meaningCapture * 30) / 100) {
+                capture(String.format("meaning-%03d-%s-%d", ordinal, actor, meaningCapture++));
             }
             if (scenarioTurn != null && duration >= 3500 && !capturedSpeakerShift
                     && ((Number)clock.invoke(null)).longValue() >= start + duration / 2 + 1300) {
@@ -421,7 +429,10 @@ public final class SmokeProbe {
         assertAudioCounts(scheduled);
         expected.put(actor, scheduled.get(actor));
         SeatedScene.verifyPose();
-        if (meaningGesture) capture(String.format("meaning-restored-%03d-%s", ordinal, actor));
+        if (meaningTurn) {
+            capture(String.format("meaning-restored-%03d-%s", ordinal, actor));
+            SeatedScene.finishMeaningTurn(actor, scenarioTurn.eventId);
+        }
         log("schedule_elapsed sequence="+ordinal+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
     }
 
@@ -524,15 +535,14 @@ public final class SmokeProbe {
             GazeModiffAdapter.install(objects, output);
         }
         if (Boolean.getBoolean("gmit.meaningminer.enabled")) {
-            title("Preparing facilitator MeaningMiner gestures");
+            title("Preparing MeaningMiner gestures for all three speakers");
             MeaningMinerBridge.install(objects, output);
             for (Turn turn : scenario.turns) {
-                if ("facilitator".equals(turn.actor)) {
-                    caption.checkCancelled();
-                    meaningPlans.put(turn.eventId, MeaningMinerBridge.analyze(turn.eventId, turn.text));
-                }
+                caption.checkCancelled();
+                MeaningMinerBridge.prepare(turn.actor, turn.eventId, turn.text);
+                meaningPlans.add(turn.eventId);
             }
-            log("meaningminer_prepared facilitator_turns=" + meaningPlans.size()
+            log("meaningminer_prepared turns=" + meaningPlans.size() + " actors=3"
                     + " dialogue_changed=false speech_generated=false");
         }
         Thread.sleep(2000);
@@ -542,30 +552,7 @@ public final class SmokeProbe {
             title("Seated group MI preview — no speech");
             Thread.sleep(3000);
             capture("01-seated-preview");
-            if (Boolean.getBoolean("gmit.meaningminer.enabled")) {
-                Method clock = Class.forName("greta.core.util.time.Timer").getMethod("getTimeMillis");
-                for (Turn turn : scenario.turns) {
-                    if (!meaningPlans.containsKey(turn.eventId)) continue;
-                    long start = ((Number)clock.invoke(null)).longValue() + 500;
-                    long end = start + 6000;
-                    if (!SeatedScene.scheduleMeaningGesture("preview-" + turn.eventId,
-                            meaningPlans.get(turn.eventId), start, end)) continue;
-                    log("meaningminer_preview event_id=" + turn.eventId + " speech=false timer_interval=synthetic");
-                    long deadlinePreview = System.currentTimeMillis() + 10000;
-                    int sample = 0;
-                    while (((Number)clock.invoke(null)).longValue() < end + 300) {
-                        caption.checkCancelled();
-                        if (System.currentTimeMillis() > deadlinePreview) throw new IllegalStateException("Gesture preview clock stalled");
-                        SeatedScene.checkHealthy();
-                        SeatedScene.observeMeaningGesture();
-                        if (sample++ % 5 == 0) capture(String.format("meaning-preview-%03d", sample));
-                        Thread.sleep(100);
-                    }
-                    SeatedScene.verifyPose();
-                    capture("meaning-preview-restored");
-                    break;
-                }
-            }
+            if (Boolean.getBoolean("gmit.meaningminer.enabled")) log("meaningminer_preview semantic_analysis_only=true use_muted_playback_for_realized_gestures=true");
             for (String actor : ACTORS) {
                 ListenerGaze.focus(actor);
                 Thread.sleep(1800);

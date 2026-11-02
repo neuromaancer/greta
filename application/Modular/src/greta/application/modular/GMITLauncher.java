@@ -17,7 +17,7 @@ import javax.swing.JFileChooser;
 /** NetBeans group MI/replay entry; optional external MODIFF never generates dialogue. */
 final class GMITLauncher {
     private static final String[] SCRATCH = {
-        "ModularSave.xml", "fml_to_bml.xml", "fml_output_mm.xml", "Log/Ogre.log",
+        "ModularSave.xml", "fml_to_bml.xml", "fml_output_mm.xml", "fml_output.xml", "test_fml.xml", "Log/Ogre.log",
         "Player/Lib/External/Win64/Plugins_OpenGL.cfg"
     };
 
@@ -115,7 +115,7 @@ final class GMITLauncher {
             List<String> command = new ArrayList<>();
             command.add(java.toString());
             command.add("-Djava.library.path=" + bin.resolve("Player/Lib/External/Win64"));
-            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms", "gmit.modiff.dir", "gmit.meaningminer.enabled")) {
+            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms", "gmit.modiff.dir", "gmit.meaningminer.enabled", "gmit.audio.muted")) {
                 if (System.getProperty(property) != null) command.add("-D" + property + "=" + System.getProperty(property));
             }
             // Keep the IDE's actual source-build classpath. Do not replace it with
@@ -127,7 +127,9 @@ final class GMITLauncher {
             command.add(output.toString());
             command.addAll(Arrays.asList(replay == null ? "10" : "0", replay == null ? "3" : "1", replay == null ? "10" : "0", scenario.toString()));
             int turnsUpperBound = replay == null ? 16 : 256;
-            runOwned(command, bin, output, "playback", 120 + turnsUpperBound * (10 + 15 + 5 + 2));
+            int timeoutSeconds = 120 + turnsUpperBound * (10 + 15 + 5 + 2);
+            if (Boolean.getBoolean("gmit.meaningminer.enabled")) timeoutSeconds += 90 + turnsUpperBound * (30 + 6);
+            runOwned(command, bin, output, "playback", timeoutSeconds);
         } finally {
             // The child has exited before restoration; native rendering threads
             // cannot overwrite these originals after they have been restored.

@@ -144,15 +144,23 @@ output to facilitator eyebrow channels while preserving lips, blink, gaze,
 and seated pose. Model readiness and routing do not establish perceptual or
 scientific validity. Do not add patient expression fixtures to ordinary replay.
 
-The authorized MeaningMiner extension is opt-in and facilitator-only; see
-`docs/gmit/MEANING_MINER.md`. Extract genuine English image-schema intentions
-without connecting a second FML/Planner/TTS speech route. SeatedScene blends a
-bounded right-arm envelope selected from the sorted schema types using actual
-Audio timing, then restores the calibrated clasp. Preserve patient poses, left
-arm, root/legs, gaze, lips, blink, and MODIFF brows. Empty semantic output means
-no gesture. This is not full dictionary realization or word-aligned behavior.
-Preserve the legacy `fml_output_mm.xml` diagnostic file, including after an owned
-child process timeout. Ordinary replay leaves the extension disabled.
+The authorized MeaningMiner extension is opt-in for all three actors; see
+`docs/gmit/MEANING_MINER.md`. Preserve genuine English image-schema and
+ideational-unit intentions, token time-marker references, and original text.
+Use each actor's existing Planner, lexicon, Realizer, and TTS exactly once;
+the MeaningMiner route replaces that turn's direct BML-reader dispatch. Do not
+combine a speech intention with a second input speech signal. Preserve all
+selected semantic gestures, including both hands, rather than selecting one
+sorted schema or substituting an authored gesture template. SeatedScene captures
+the actual arm/finger BAP output, preserves its timing, and blends back to the
+calibrated clasp. Root/legs, gaze, lips, blink, and optional MODIFF brows retain
+their existing owners; standing-body signals must not override the seated scene.
+Empty semantic output means speech without an invented gesture. Preserve legacy
+parser/Planner scratch files, including after an owned child timeout. Ordinary
+replay leaves the extension disabled. `-Muted` runs real synthesis and animation
+without physical audio; `-Preview` only checks layout and semantic extraction.
+Library availability is not visual acceptance of every gesture or a collision
+solver, and English-path support does not establish other-language support.
 
 ## Agent responsibilities
 

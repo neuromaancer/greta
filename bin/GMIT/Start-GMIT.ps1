@@ -2,6 +2,7 @@ param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [switch]$DisableListenerGaze, [switch]$DisableTabletopArms,
     [switch]$MeaningMiner,
+    [switch]$Muted,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
@@ -13,6 +14,7 @@ if ($modes.Count -gt 1) {
     throw 'Choose only one of -Smoke, -GroupMI, -Replay, or -Original.'
 }
 $automatic = $Smoke -or $GroupMI -or [bool]$Replay
+if ($Muted -and -not $automatic) { throw '-Muted requires an automatic Smoke/GroupMI/Replay run.' }
 if ($MeaningMiner -and ((-not ($GroupMI -or $Replay)) -or $DisableTabletopArms)) {
     throw 'MeaningMiner requires a seated GroupMI/Replay run with tabletop arms enabled.'
 }
@@ -74,11 +76,14 @@ if ($Replay) {
 # scheduling (10), audio (15), the chosen gap, and a 2-second capture margin.
 # Smoke remains capped at 278 seconds; a 16-turn scenario is capped at 662.
 $runTimeoutSeconds = 120 + $StartDelaySeconds + $EndHoldSeconds + $turnCount * (10 + 15 + $TurnGapSeconds + 2)
+# Three bounded extractor initializations, one bounded analysis per turn,
+# and the maximum seated gesture return tail in addition to ordinary playback.
+if ($MeaningMiner) { $runTimeoutSeconds += 90 + $turnCount * (30 + 6) }
 $runPrefix = if ($GroupMI) { 'group-mi-' } elseif ($Replay) { 'replay-' } else { 'run-' }
 $run = Join-Path $PSScriptRoot ('local\' + $runPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $run | Out-Null
 # These existing runtime scratch files are restored even when startup/playback fails.
-$mutable = @('ModularSave.xml', 'fml_to_bml.xml', 'fml_output_mm.xml', 'Log\Ogre.log', 'Player\Lib\External\Win64\Plugins_OpenGL.cfg')
+$mutable = @('ModularSave.xml', 'fml_to_bml.xml', 'fml_output_mm.xml', 'fml_output.xml', 'test_fml.xml', 'Log\Ogre.log', 'Player\Lib\External\Win64\Plugins_OpenGL.cfg')
 $present = @{}
 foreach ($name in $mutable) {
     $path = Join-Path $bin $name
@@ -112,6 +117,7 @@ try {
         if ($DisableListenerGaze) { $arguments = @('-Dgmit.gaze.enabled=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
+        if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }
@@ -119,7 +125,8 @@ try {
     if ($GroupMI) { Write-Output ('Synthetic authored group MI demo: ' + $turnCount + ' turns; no live GMIT or dialogue generation.') }
     if ($Replay) { Write-Output ('Offline recorded replay: ' + $turnCount + ' chunks; no live GMIT or dialogue generation.') }
     if ($ModiffDirectory) { Write-Output 'Experimental facilitator eyebrow adaptation uses the external local MODIFF worker.' }
-    if ($MeaningMiner) { Write-Output 'MeaningMiner adds bounded facilitator hand gestures from the original text; it does not generate dialogue.' }
+    if ($MeaningMiner) { Write-Output 'MeaningMiner realizes original semantic gesture lexicons for all three speakers through one speech path per turn.' }
+    if ($Muted) { Write-Output 'Audio output is muted; TTS, lip animation, and speech scheduling remain active.' }
     $process = Start-Process -FilePath $java -ArgumentList $arguments -WorkingDirectory $bin -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError (Join-Path $run 'stderr.log') -PassThru
     $null = $process.Handle
     if ($automatic) {
