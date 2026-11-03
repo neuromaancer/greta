@@ -30,6 +30,22 @@ It preserves the single speech route, realizes original library arm/finger
 motions, and blends back to the calibrated seated clasp. Ordinary replay leaves
 it disabled; Pure/RL decisions are unaffected. Its verification record separates
 library availability, actual selected gestures, and human visual acceptance.
+The initial cross-hand-only guard was rejected in human review on 2026-11-03 and
+rolled back. Its replacement checks palm/finger/arm proxies against the torso
+and a tabletop boundary derived from the room XML, including sampled transitions.
+It raises the resting clasp approximately 20 mm and fits a forward open workspace
+with shoulder rotation, then restores the checked clasp path. The three actors
+use balanced, reserved, and animated gesture profiles while retaining semantic
+references. Exact-source offline checks passed seven trajectories (1,133 frames);
+the source-only muted runtime passed seven turns (1,135 projected frames and 365
+observed samples). A subsequent audible run exposed a sparse-search omission;
+the corrected six-axis corner fallback passed the actual failed transitions.
+The final audible replay passed seven turns, 1,132 projected frames, and 363
+observed samples. The user confirmed no obvious intersections, distinct actor
+styles, and normal remaining behavior. The maximum measured queue batch across
+these checks was 315 ms, so this is not a 25 fps guarantee or universal mesh
+collision proof. See the
+same record for geometry limits, deployment receipts, and final observations.
 
 ## Baseline and ownership
 
@@ -141,10 +157,10 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete fifteen-file allowlist: the scene,
+`integrations/gmit/deployment.json` is the complete sixteen-file allowlist: the scene,
 four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
 source, seated-pose helper, listener-gaze helper, optional MODIFF bridge,
-MeaningMiner bridge and gesture helper, room layout, and local-output ignore
+MeaningMiner bridge, gesture and hand-geometry helpers, room layout, and local-output ignore
 file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,

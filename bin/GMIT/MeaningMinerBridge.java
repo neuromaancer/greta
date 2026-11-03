@@ -358,6 +358,8 @@ public final class MeaningMinerBridge {
             String kind = signal.getClass().getSimpleName();
             if ("SpeechSignal".equals(kind)) { state.active.speechSignals++; allowed.add(signal); }
             else if (kind.contains("Gesture") || kind.contains("Pointing")) {
+                Class.forName("SeatedScene").getMethod("applyMeaningStyle", String.class, Object.class)
+                        .invoke(null, state.actor, signal);
                 state.active.gestureSignals.add(kind); allowed.add(signal);
                 System.out.println("GMIT_MEANING_MINER selected actor=" + state.actor + " event_id=" + state.active.eventId + " " + signalAudit(signal));
             }

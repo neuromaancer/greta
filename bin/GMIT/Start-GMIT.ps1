@@ -1,7 +1,7 @@
 param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [switch]$DisableListenerGaze, [switch]$DisableTabletopArms,
-    [switch]$MeaningMiner,
+    [switch]$MeaningMiner, [switch]$DisableHandSafety,
     [switch]$Muted,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
@@ -94,8 +94,8 @@ Push-Location $bin
 $process = $null
 try {
     if ($automatic) {
-        $compileArgs = @('-encoding', 'UTF-8', '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'ListenerGaze.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'GazeModiffAdapter.java') + '"'))
-        $compileArgs += @(('"' + (Join-Path $PSScriptRoot 'MeaningMinerBridge.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'MeaningGesture.java') + '"'))
+        $compileArgs = @('-encoding', 'UTF-8', '-classpath', ('"' + (Join-Path $bin 'Modular.jar') + '"'), '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'ListenerGaze.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'GazeModiffAdapter.java') + '"'))
+        $compileArgs += @(('"' + (Join-Path $PSScriptRoot 'MeaningMinerBridge.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'MeaningGesture.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'HandCollision.java') + '"'))
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -117,6 +117,7 @@ try {
         if ($DisableListenerGaze) { $arguments = @('-Dgmit.gaze.enabled=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
+        if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }
         if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }

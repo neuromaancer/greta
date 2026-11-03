@@ -1,9 +1,12 @@
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.ObjectOutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -11,6 +14,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -21,14 +29,17 @@ import org.xml.sax.SAXException;
 
 /** Shared group-MI scenery, seated legs, and optional tabletop arm pose. */
 public final class SeatedScene {
-    private static final String ROOM_FILE = "./Environments/GMIT/group-mi-room.xml";
+    private static final String ROOM_FILE = System.getProperty("gmit.room.file", "./Environments/GMIT/group-mi-room.xml");
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
     private static final Set<String> ARM_JOINTS = armJointNames();
     private static final boolean ARMS = Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true"));
     private static final boolean MEANING_GESTURES = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.enabled", "false"));
+    private static final boolean HAND_SAFETY = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.handSafety", "true"));
+    private static final int ARM_LOOKAHEAD_FRAMES = 12; // 480 ms; the playback observer pumps at 100 ms.
     private static final List<PoseController> CONTROLLERS = new ArrayList<PoseController>();
     private static volatile boolean installed;
     private static volatile Throwable poseFailure;
+    private static File evidenceDirectory;
 
     private SeatedScene() { }
 
@@ -40,7 +51,7 @@ public final class SeatedScene {
         applyCamera(require(objects, "gmit-player"), layout);
         try {
             for (String actor : ACTORS) {
-                PoseController controller = new PoseController(actor, layout.pose(actor),
+                PoseController controller = new PoseController(actor, layout.pose(actor), layout.table,
                         require(objects, "gmit-" + actor + "-avatar"), require(objects, "gmit-" + actor + "-body"));
                 controller.resetStaticTransform();
                 CONTROLLERS.add(controller);
@@ -58,6 +69,33 @@ public final class SeatedScene {
     public static void checkHealthy() {
         Throwable failure = poseFailure;
         if (failure != null) throw new IllegalStateException("GMIT seated pose overlay failed", failure);
+    }
+
+    /** Snapshot the actual three avatar skeletons after the seated hold has rendered. */
+    public static void prepareHandSafety(File output) throws Exception {
+        evidenceDirectory = output;
+        if (!MEANING_GESTURES || !ARMS || !HAND_SAFETY) return;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+        while (System.nanoTime() < deadline) {
+            final CountDownLatch finished = new CountDownLatch(1);
+            final Throwable[] problem = new Throwable[1];
+            final boolean[] ready = new boolean[1];
+            greta.auxiliary.player.ogre.Ogre.call(new greta.auxiliary.player.ogre.OgreThread.Callback() {
+                @Override public void run() {
+                    try {
+                        for (PoseController controller : CONTROLLERS) if (controller.nativeAgent() == null) return;
+                        for (PoseController controller : CONTROLLERS) controller.prepareHandSafety();
+                        ready[0] = true;
+                    } catch (Throwable failure) { problem[0] = failure; }
+                    finally { finished.countDown(); }
+                }
+            });
+            if (!finished.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("Timed out capturing Autodesk hand geometry");
+            if (problem[0] != null) throw new IllegalStateException("Cannot initialize hand collision protection", problem[0]);
+            if (ready[0]) return;
+            Thread.sleep(200);
+        }
+        throw new IllegalStateException("Native Autodesk avatars did not become ready within 60 seconds");
     }
 
     /** Checks actual root and leg BAP values after idle or speech body output. */
@@ -80,6 +118,21 @@ public final class SeatedScene {
     public static synchronized void beginMeaningTurn(String actor, String eventId) throws Exception {
         if (!MEANING_GESTURES || !ARMS || !installed) return;
         controller(actor).beginMeaningTurn(eventId);
+    }
+
+    /** Change only expressivity; preserve the selected gesture and word markers. */
+    public static synchronized void applyMeaningStyle(String actor, Object gesture) throws Exception {
+        if (!MEANING_GESTURES || !ARMS || !installed) return;
+        MeaningGesture.Style style = controller(actor).pose.style;
+        if ("legacy".equals(style.name)) return;
+        String[] names = {"setSPC", "setTMP", "setFLD", "setPWR"};
+        double[] values = {style.spatial, style.temporal, style.fluidity, style.power};
+        for (int i = 0; i < names.length; i++)
+            gesture.getClass().getMethod(names[i], Double.TYPE).invoke(gesture, Double.valueOf(values[i]));
+        System.out.println("GMIT_MEANING_STYLE actor=" + actor + " style=" + style.name
+                + " spatial=" + style.spatial + " temporal=" + style.temporal
+                + " fluidity=" + style.fluidity + " power=" + style.power
+                + " left_gain=" + style.leftGain + " right_gain=" + style.rightGain);
     }
 
     /**
@@ -162,7 +215,9 @@ public final class SeatedScene {
                     number(seat, "l_elbow_twisting_degrees", 0), number(seat, "r_elbow_twisting_degrees", 0),
                     number(seat, "l_wrist_flexion_degrees", 0), number(seat, "r_wrist_flexion_degrees", 0),
                     number(seat, "l_wrist_pivot_degrees", 0), number(seat, "r_wrist_pivot_degrees", 0),
-                    number(seat, "l_wrist_twisting_degrees", 0), number(seat, "r_wrist_twisting_degrees", 0), readArmOverrides(seat)));
+                    number(seat, "l_wrist_twisting_degrees", 0), number(seat, "r_wrist_twisting_degrees", 0), readArmOverrides(seat), readGestureOffsets(seat),
+                    MeaningGesture.Style.named(seat.hasAttribute("gesture_style") ? seat.getAttribute("gesture_style") : "legacy"),
+                    number(seat, "gesture_release_lead", 0)));
         }
         for (String actor : ACTORS) if (!poses.containsKey(actor)) throw new IllegalArgumentException("Room seat is missing actor: " + actor);
         return new RoomLayout(root, poses, number(root, "camera_x", 0), number(root, "camera_y", 1.5),
@@ -194,6 +249,7 @@ public final class SeatedScene {
         for (int i = 0; i < children.getLength(); i++) {
             Node child = children.item(i);
             if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+            if ("gesture-arm-offset".equals(child.getNodeName())) continue;
             if (!"arm-joint".equals(child.getNodeName())) throw new IllegalArgumentException("Unsupported seat child " + child.getNodeName());
             Element joint = (Element)child;
             String name = joint.getAttribute("name");
@@ -207,6 +263,25 @@ public final class SeatedScene {
             overrides.put(name, degrees);
         }
         return overrides;
+    }
+
+    private static Map<String, Double> readGestureOffsets(Element seat) {
+        Map<String, Double> offsets = new LinkedHashMap<String, Double>();
+        NodeList children = seat.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE || !"gesture-arm-offset".equals(child.getNodeName())) continue;
+            Element joint = (Element)child;
+            String name = joint.getAttribute("name");
+            if (!name.matches("[lr]_(shoulder_(abduct|flexion|twisting)|elbow_flexion)") || offsets.containsKey(name))
+                throw new IllegalArgumentException("Invalid or duplicate gesture-arm-offset name: " + name);
+            if (!joint.hasAttribute("degrees")) throw new IllegalArgumentException("gesture-arm-offset degrees is required");
+            double degrees = number(joint, "degrees", Double.NaN);
+            if (!Double.isFinite(degrees) || Math.abs(degrees) > 35)
+                throw new IllegalArgumentException("Out-of-range gesture-arm-offset degrees: " + degrees);
+            offsets.put(name, Double.valueOf(degrees));
+        }
+        return offsets;
     }
 
     private static void addRoom(Object environment, Element room) throws Exception {
@@ -304,24 +379,59 @@ public final class SeatedScene {
 
     private static final class RoomLayout {
         private final Element root; private final Map<String, PoseSpec> poses;
+        private final double[] table;
         private final double cameraX, cameraY, cameraZ, cameraPitch;
         RoomLayout(Element root, Map<String, PoseSpec> poses, double cameraX, double cameraY, double cameraZ, double cameraPitch) {
             this.root = root; this.poses = poses; this.cameraX = cameraX; this.cameraY = cameraY; this.cameraZ = cameraZ; this.cameraPitch = cameraPitch;
+            this.table = readTableBounds(root);
         }
         PoseSpec pose(String actor) { return poses.get(actor); }
+    }
+
+    /** Derive collision geometry from the same min-corner table node as rendering. */
+    private static double[] readTableBounds(Element room) {
+        Element table = null;
+        NodeList nodes = room.getChildNodes();
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Node node = nodes.item(i);
+            if (node instanceof Element && "gmit-group-mi-table".equals(((Element)node).getAttribute("id"))) {
+                if (table != null) throw new IllegalArgumentException("Duplicate seated table");
+                table = (Element)node;
+            }
+        }
+        if (table == null) throw new IllegalArgumentException("Seated collision checks require a table");
+        Element position = child(table, "position"), leaf = child(table, "leaf");
+        Element size = leaf == null ? null : child(leaf, "size");
+        if (position == null || size == null) throw new IllegalArgumentException("Table position and size are required");
+        Element orientation = child(table, "orientation"), scaling = child(table, "scale");
+        for (String axis : new String[] {"x", "y", "z"})
+            if (orientation != null && Math.abs(number(orientation, axis, 0)) > 1e-8)
+                throw new IllegalArgumentException("Table boundary requires an axis-aligned table");
+        double x = number(position, "x", 0), y = number(position, "y", 0), z = number(position, "z", 0);
+        double width = number(size, "x", 0) * (scaling == null ? 1 : scale(scaling, "x"));
+        double height = number(size, "y", 0) * (scaling == null ? 1 : scale(scaling, "y"));
+        double depth = number(size, "z", 0) * (scaling == null ? 1 : scale(scaling, "z"));
+        if (width <= 0 || height <= 0 || depth <= 0) throw new IllegalArgumentException("Table dimensions must be positive");
+        return new double[] {x, x + width, z, z + depth, y + height};
     }
 
     private static final class PoseSpec {
         private final double x, z, yaw, vertical, hip, knee, ankle, sacroiliac, lShoulderFlexion, rShoulderFlexion, lShoulderAbduct, rShoulderAbduct, lElbowFlexion, rElbowFlexion, lElbowTwisting, rElbowTwisting, lWristFlexion, rWristFlexion, lWristPivot, rWristPivot;
         private final double lWristTwisting, rWristTwisting;
-        private final Map<String, Double> armOverrides;
-        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting, Map<String, Double> armOverrides) {
+        private final Map<String, Double> armOverrides, gestureOffsets;
+        private final MeaningGesture.Style style;
+        private final double releaseLead;
+        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting, Map<String, Double> armOverrides, Map<String, Double> gestureOffsets, MeaningGesture.Style style, double releaseLead) {
             this.x = x; this.z = z; this.yaw = yaw; this.vertical = vertical;
             this.hip = hip; this.knee = knee; this.ankle = ankle; this.sacroiliac = sacroiliac;
             this.lShoulderFlexion = lShoulderFlexion; this.rShoulderFlexion = rShoulderFlexion; this.lShoulderAbduct = lShoulderAbduct; this.rShoulderAbduct = rShoulderAbduct;
             this.lElbowFlexion = lElbowFlexion; this.rElbowFlexion = rElbowFlexion; this.lElbowTwisting = lElbowTwisting; this.rElbowTwisting = rElbowTwisting; this.lWristFlexion = lWristFlexion; this.rWristFlexion = rWristFlexion; this.lWristPivot = lWristPivot; this.rWristPivot = rWristPivot;
             this.lWristTwisting = lWristTwisting; this.rWristTwisting = rWristTwisting;
             this.armOverrides = Collections.unmodifiableMap(new LinkedHashMap<String, Double>(armOverrides));
+            this.gestureOffsets = Collections.unmodifiableMap(new LinkedHashMap<String, Double>(gestureOffsets));
+            this.style = style;
+            if (releaseLead < 0 || releaseLead > .5) throw new IllegalArgumentException("Invalid gesture release lead");
+            this.releaseLead = releaseLead;
         }
         double arm(String name, double fallback) { Double value = armOverrides.get(name); return value == null ? fallback : value.doubleValue(); }
     }
@@ -329,14 +439,120 @@ public final class SeatedScene {
     /** Redirects body frames through a seated lower-body and tabletop-arm overlay without touching face or lip channels. */
     private static final class PoseController {
         private final String actor; private final PoseSpec pose; private final Object avatar, body; private final ClassLoader loader;
+        private final double[] table;
         private Object proxy;
         private volatile MeaningGesture.Turn meaningTurn;
         private boolean observedMeaningMovement, observedMeaningRestored;
         private boolean observedMeaningBodyMaskFilter;
         private boolean observedMeaningPending;
+        private HandCollision.Model handModel;
+        private double handClearance, handContact, fingerPalmContact;
+        private Map<String, Double> handBase;
+        private final Map<List<Object>, HandCollision.Result> projectionMemo = new LinkedHashMap<List<Object>, HandCollision.Result>(512, .75f, true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<List<Object>, HandCollision.Result> eldest) { return size() > 512; }
+        };
+        private final Map<List<Object>, HandCollision.Result> calibratedOpening = new LinkedHashMap<List<Object>, HandCollision.Result>();
+        private final List<Map<String, Double>> handOpeningPath = new ArrayList<Map<String, Double>>();
+        private final List<Double> handOpeningWeights = new ArrayList<Double>();
+        private final TreeMap<Integer, Map<String, Double>> safePoses = new TreeMap<Integer, Map<String, Double>>();
+        private final TreeMap<Integer, Map<String, Double>> candidatePoses = new TreeMap<Integer, Map<String, Double>>();
+        private final TreeMap<Integer, Double> requiredClearances = new TreeMap<Integer, Double>();
+        private final TreeMap<Integer, Double> requiredFingerPalmClearances = new TreeMap<Integer, Double>();
+        private final TreeMap<Integer, String> safetyTrace = new TreeMap<Integer, String>();
+        private int safetyObservedFrames;
+        private double observedTorso, observedUpperArm, observedTable, observedUpperTorso, observedUpperTable;
+        private int safetyLastObservedFrame = -1;
+        private long safetyProjectionNanos, safetyMaxBatchNanos, safetyMemoHits, safetySolves;
 
-        PoseController(String actor, PoseSpec pose, Object avatar, Object body) {
-            this.actor = actor; this.pose = pose; this.avatar = avatar; this.body = body; this.loader = avatar.getClass().getClassLoader();
+        private Object nativeAgent() throws Exception {
+            Class<?> registry = loader.loadClass("greta.auxiliary.player.ogre.OgreEnvironementListener");
+            Object matched = null;
+            for (Object agent : (List<?>)registry.getField("agents").get(null)) {
+                if (SeatedScene.invoke(agent, "getMPEG4Animatable") == avatar) {
+                    if (matched != null) throw new IllegalStateException("Duplicate native avatar for " + actor);
+                    matched = agent;
+                }
+            }
+            return matched;
+        }
+
+        void prepareHandSafety() throws Exception {
+            Object matched = nativeAgent();
+            if (matched == null) throw new IllegalStateException("Native Autodesk avatar is unavailable for " + actor);
+            handModel = HandCollision.capture(matched);
+            Object current = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
+            Object snapshot = current.getClass().getMethod("clone").invoke(current);
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            Map<String, Double> actual = new LinkedHashMap<String, Double>();
+            for (Object channel : types.getEnumConstants()) actual.put(((Enum<?>)channel).name(),
+                    Double.valueOf(((Number)SeatedScene.invoke(snapshot, "getDegreeValue", channel)).doubleValue()));
+            double residual = handModel.nativeResidual(actual);
+            double tolerance = handModel.nativeTolerance(actual);
+            handModel = handModel.withFixedPose(actual).withBoundaries(HandCollision.Boundaries.seated(
+                    table[0], table[1], table[2], table[3], table[4], pose.x, pose.vertical / 1000.0, pose.z));
+            handBase = Collections.unmodifiableMap(armBases());
+            HandCollision.Metrics resting = handModel.measure(handBase);
+            System.out.println("GMIT_BODY_SAFETY baseline actor=" + actor + " torso=" + resting.handsToTorso
+                    + " upper_arm=" + resting.handsToUpperArms + " table=" + resting.tabletop
+                    + " upper_arm_torso=" + resting.upperArmsToTorso + " upper_arm_table=" + resting.upperArmsToTable
+                    + " table_bounds=" + Arrays.toString(table));
+            if (resting.boundaryMinimum() < -1e-8)
+                throw new IllegalStateException("Resting hands violate body/table boundaries for " + actor);
+            handClearance = handModel.recommendedClearance(handBase);
+            handContact = handModel.measure(handBase).minimum();
+            fingerPalmContact = handModel.measure(handBase).fingerPalm;
+            System.out.println("GMIT_HAND_SAFETY workspace actor=" + actor + " offsets=" + pose.gestureOffsets);
+            Files.write(new File(evidenceDirectory, "hand-skeleton-" + actor + ".txt").toPath(),
+                    handModel.debugSnapshot().getBytes(StandardCharsets.UTF_8));
+            System.out.println("GMIT_HAND_SAFETY calibration actor=" + actor + " max_fk_error=" + residual + " tolerance=" + tolerance);
+            if (!Double.isFinite(residual) || residual > tolerance)
+                throw new IllegalStateException("Native hand geometry validation failed for " + actor + ": " + residual);
+            try (ObjectOutputStream snapshotFile = new ObjectOutputStream(new FileOutputStream(
+                    new File(evidenceDirectory, "hand-skeleton-" + actor + ".ser")))) {
+                // Trusted local diagnostic only: no model loader is exposed by this extension.
+                snapshotFile.writeObject(handModel);
+            }
+            prepareOpening();
+            System.out.println("GMIT_HAND_SAFETY ready actor=" + actor + " clearance_native_units=" + handClearance);
+        }
+
+        private void prepareOpening() {
+            // A checked release also supplies the exact reverse path into the
+            // clasp. Returning from an arbitrary nearby arm correction can
+            // put the fingers on the wrong side of one another.
+            MeaningGesture.Turn opening = new MeaningGesture.Turn(actor, "hand-opening-calibration", 0.35, pose.gestureOffsets, pose.style, pose.releaseLead);
+            Map<String, Double> separated = new LinkedHashMap<String, Double>(handBase);
+            for (String joint : separated.keySet()) {
+                if (joint.contains("_thumb") || joint.contains("_index") || joint.contains("_middle")
+                        || joint.contains("_ring") || joint.contains("_pinky")) separated.put(joint, Double.valueOf(0));
+            }
+            opening.capture(0, separated); opening.bind(0, 1000);
+            Map<String, Double> previous = handBase, previousCandidate = handBase;
+            double previousClearance = handContact, previousPalmClearance = fingerPalmContact;
+            handOpeningPath.clear(); handOpeningWeights.clear(); calibratedOpening.clear();
+            handOpeningPath.add(handBase); handOpeningWeights.add(Double.valueOf(0));
+            long start = System.nanoTime();
+            for (int frame = 1; frame <= MeaningGesture.WORKSPACE_FRAMES; frame++) {
+                Map<String, Double> candidate = Collections.unmodifiableMap(opening.poseAt(frame, handBase));
+                double weight = opening.clearanceWeightAt(frame);
+                double clearance = handContact + (Math.max(handContact, handClearance) - handContact) * weight;
+                double palmClearance = fingerPalmContact + (Math.max(fingerPalmContact, handClearance) - fingerPalmContact) * weight;
+                HandCollision.Result result = handModel.correct(candidate, handBase, .5,
+                        previous, previousCandidate, previousClearance, clearance, previousPalmClearance, palmClearance);
+                if (!result.cleared) throw new IllegalStateException("Cannot calibrate checked hand release actor=" + actor + " frame=" + frame);
+                calibratedOpening.put(Arrays.<Object>asList(candidate, previous, previousCandidate, handBase,
+                        Double.valueOf(.5), Double.valueOf(previousClearance), Double.valueOf(clearance),
+                        Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance)), result);
+                handOpeningPath.add(result.pose); handOpeningWeights.add(Double.valueOf(weight));
+                previous = result.pose; previousCandidate = candidate;
+                previousClearance = clearance; previousPalmClearance = palmClearance;
+            }
+            System.out.println("GMIT_HAND_SAFETY opening_calibrated actor=" + actor + " frames=" + calibratedOpening.size()
+                    + " elapsed_ms=" + (System.nanoTime() - start) / 1000000);
+        }
+
+        PoseController(String actor, PoseSpec pose, double[] table, Object avatar, Object body) {
+            this.actor = actor; this.pose = pose; this.table = table.clone(); this.avatar = avatar; this.body = body; this.loader = avatar.getClass().getClassLoader();
         }
 
         /* Root translations are absolute in MPEG4Agent, so only BAP owns placement. */
@@ -391,7 +607,7 @@ public final class SeatedScene {
             // later submission, so this atomically replaces stale projected
             // return values without cancelling unrelated gaze frames.
             if (turn != null && turn.isBound() && turn.hasRawFrames())
-                replayCapturedArms(turn);
+                replayCapturedArms(turn, true);
             List<Object> overlaid = new ArrayList<Object>();
             for (Object frame : source) {
                 Object copy = frame.getClass().getMethod("clone").invoke(frame);
@@ -409,11 +625,17 @@ public final class SeatedScene {
         synchronized void beginMeaningTurn(String eventId) {
             if (meaningTurn != null && !meaningTurn.restoredAt(safeCurrentFrame()))
                 throw new IllegalStateException("Meaning gesture is already active for " + actor);
-            meaningTurn = new MeaningGesture.Turn(actor, eventId, seatedGestureGain());
+            meaningTurn = new MeaningGesture.Turn(actor, eventId, seatedGestureGain(), pose.gestureOffsets, pose.style, pose.releaseLead);
+            if (HAND_SAFETY) meaningTurn.setHandReturnPath(handOpeningPath, handOpeningWeights);
             observedMeaningMovement = false;
             observedMeaningRestored = false;
             observedMeaningBodyMaskFilter = false;
             observedMeaningPending = false;
+            safePoses.clear(); candidatePoses.clear(); requiredClearances.clear(); requiredFingerPalmClearances.clear(); safetyTrace.clear(); projectionMemo.clear(); safetyObservedFrames = 0; safetyLastObservedFrame = -1;
+            observedTorso = observedUpperArm = observedTable = observedUpperTorso = observedUpperTable = Double.POSITIVE_INFINITY;
+            projectionMemo.putAll(calibratedOpening);
+            safetyProjectionNanos = 0; safetyMaxBatchNanos = 0; safetyMemoHits = 0; safetySolves = 0;
+            if (HAND_SAFETY && handModel == null) throw new IllegalStateException("Hand geometry is not ready for " + actor);
             System.out.println("GMIT_MEANING_GESTURE capture_begin actor=" + actor + " event=" + eventId);
         }
 
@@ -424,7 +646,7 @@ public final class SeatedScene {
             // called beginMeaningTurn and therefore owns an arm capture.
             if (turn == null || !turn.eventId.equals(eventId)) return;
             turn.bind(audioStartMillis, audioEndMillis);
-            try { replayCapturedArms(turn); }
+            try { replayCapturedArms(turn, true); }
             catch (Exception failure) { throw new IllegalStateException("Cannot replay seated MeaningMiner arm frames", failure); }
             System.out.println("GMIT_MEANING_GESTURE bound actor=" + actor + " event=" + eventId
                     + " raw_frames=" + turn.rawFrameCount() + " first_frame=" + turn.firstRawFrame()
@@ -434,9 +656,27 @@ public final class SeatedScene {
         synchronized void observeMeaningGesture() throws Exception {
             MeaningGesture.Turn turn = meaningTurn;
             if (turn == null || !turn.isBound()) return;
+            // Keep a bounded future window alive even when the Realizer stops
+            // sending body frames during a hold or the return to the clasp.
+            replayCapturedArms(turn, false);
             Object current = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
             Object frame = current.getClass().getMethod("clone").invoke(current);
             int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
+            if (HAND_SAFETY && turn.activeAt(frameNumber) && frameNumber != safetyLastObservedFrame && safePoses.containsKey(frameNumber)) {
+                Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+                Map<String, Double> observed = new LinkedHashMap<String, Double>();
+                for (String joint : ARM_JOINTS) observed.put(joint, Double.valueOf(degree(frame, types, joint)));
+                HandCollision.Metrics geometry = handModel.measure(observed);
+                observedTorso = Math.min(observedTorso, geometry.handsToTorso);
+                observedUpperArm = Math.min(observedUpperArm, geometry.handsToUpperArms);
+                observedTable = Math.min(observedTable, geometry.tabletop);
+                observedUpperTorso = Math.min(observedUpperTorso, geometry.upperArmsToTorso);
+                observedUpperTable = Math.min(observedUpperTable, geometry.upperArmsToTable);
+                // Degree values are quantized when converted to BAP integers.
+                if (geometry.boundaryMinimum() < -handModel.nativeTolerance(observed))
+                    throw new IllegalStateException("Observed body/table clearance failed actor=" + actor + " frame=" + frameNumber);
+                safetyObservedFrames++; safetyLastObservedFrame = frameNumber;
+            }
             if (turn.activeAt(frameNumber) && !observedMeaningMovement) {
                 Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
                 double left = degree(frame, types, "l_shoulder_flexion");
@@ -474,7 +714,15 @@ public final class SeatedScene {
             Object frame = current.getClass().getMethod("clone").invoke(current);
             Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
             for (String joint : ARM_JOINTS) assertArm(frame, types, joint, armBase(joint));
+            writeSafetyTrace(turn);
+            if (HAND_SAFETY) System.out.println("GMIT_HAND_SAFETY finished actor=" + actor + " event=" + eventId
+                    + " projected_frames=" + safePoses.size() + " observed_frames=" + safetyObservedFrames
+                    + " solve_ms=" + safetyProjectionNanos / 1000000 + " max_batch_ms=" + safetyMaxBatchNanos / 1000000
+                    + " solves=" + safetySolves + " memo_hits=" + safetyMemoHits
+                    + " observed_torso_min=" + observedTorso + " observed_upper_arm_min=" + observedUpperArm + " observed_table_min=" + observedTable
+                    + " observed_upper_arm_torso_min=" + observedUpperTorso + " observed_upper_arm_table_min=" + observedUpperTable);
             meaningTurn = null;
+            projectionMemo.clear();
             System.out.println("GMIT_MEANING_GESTURE finished actor=" + actor + " event=" + eventId + " frame=" + frameNumber);
         }
 
@@ -573,12 +821,116 @@ public final class SeatedScene {
             // channels plus explicit room XML overrides, not a newly masked
             // universe of finger channels.
             if (turn == null || !turn.activeAt(frameNumber)) { applyStaticArms(frame, types); return; }
-            Map<String, Double> emitted = new LinkedHashMap<String, Double>();
-            for (String joint : ARM_JOINTS) {
-                double value = turn.hasValueAt(joint, frameNumber) ? turn.valueAt(joint, frameNumber, armBase(joint)) : armBase(joint);
-                setDegrees(frame, types, joint, value); emitted.put(joint, Double.valueOf(value));
+            if (frameNumber > currentFrame() + ARM_LOOKAHEAD_FRAMES) {
+                // The observer will supply these arm channels near their due
+                // time. Future standing-source masks must not bypass it.
+                for (String joint : ARM_JOINTS) invoke(frame, "setMask", type(types, joint), Boolean.FALSE);
+                return;
             }
+            Map<String, Double> emitted = projectArms(turn, frameNumber);
+            for (String joint : ARM_JOINTS) setDegrees(frame, types, joint, emitted.get(joint).doubleValue());
             turn.recordEmitted(frameNumber, emitted);
+        }
+
+        private Map<String, Double> armBases() {
+            Map<String, Double> base = new LinkedHashMap<String, Double>();
+            for (String joint : ARM_JOINTS) base.put(joint, Double.valueOf(armBase(joint)));
+            return base;
+        }
+
+        private Map<String, Double> projectArms(MeaningGesture.Turn turn, int frame) throws Exception {
+            if (HAND_SAFETY && safePoses.containsKey(Integer.valueOf(frame))) return safePoses.get(Integer.valueOf(frame));
+            Map<String, Double> base = HAND_SAFETY ? handBase : armBases();
+            Map<String, Double> target = turn.poseAt(frame, base);
+            if (!HAND_SAFETY) return target;
+            double weight = turn.clearanceWeightAt(frame);
+            String phase = turn.phaseNameAt(frame);
+            // The interlaced release/return retains the calibrated contact
+            // depth before requiring an air gap. This is still a checked
+            // moving pose, not the solver's exact-rest exemption.
+            double motionPhase = "unclasp".equals(phase) || "reclasp".equals(phase) ? .5 : weight;
+            Map.Entry<Integer, Map<String, Double>> prior = safePoses.lowerEntry(Integer.valueOf(frame));
+            double clearance = handContact + (Math.max(handContact, handClearance) - handContact) * weight;
+            double palmClearance = fingerPalmContact + (Math.max(fingerPalmContact, handClearance) - fingerPalmContact) * weight;
+            Map<String, Double> predecessor = prior == null ? base : prior.getValue();
+            Map<String, Double> previousCandidate = prior == null ? base : candidatePoses.get(prior.getKey());
+            double previousClearance = prior == null ? handContact : requiredClearances.get(prior.getKey()).doubleValue();
+            double previousPalmClearance = prior == null ? fingerPalmContact : requiredFingerPalmClearances.get(prior.getKey()).doubleValue();
+            // A late raw batch changes the candidate or predecessor key. Exact
+            // repeated future holds can reuse a result without repeating FK.
+            List<Object> key = Arrays.<Object>asList(Collections.unmodifiableMap(target), predecessor, previousCandidate, base,
+                    Double.valueOf(motionPhase), Double.valueOf(previousClearance), Double.valueOf(clearance),
+                    Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance));
+            HandCollision.Result result = projectionMemo.get(key);
+            if (result == null) {
+                long started = System.nanoTime();
+                if ("reclasp".equals(phase)) {
+                    // The semantic return must reach the verified separated
+                    // endpoint exactly before reversing the release. A nearby
+                    // collision-free pose can lie on a different finger path.
+                    boolean joined = frame != turn.reclaspStartFrame() || sameArmPose(predecessor, target);
+                    HandCollision.Metrics measured = handModel.measure(target);
+                    boolean safe = joined && measured.minimum() >= clearance - 1e-8
+                            && measured.fingerPalm >= palmClearance - 1e-8
+                            && measured.boundaryMinimum() >= -1e-8
+                            && handModel.pathMarginBoundary(predecessor, target).minimumMargin >= -1e-8
+                            && handModel.pathMargin(predecessor, target, previousClearance, clearance).minimumMargin >= -1e-8
+                            && handModel.pathMarginFingerPalm(predecessor, target, previousPalmClearance, palmClearance).minimumMargin >= -1e-8;
+                    result = new HandCollision.Result(target, measured, measured, safe, 0);
+                } else {
+                    result = handModel.correct(target, base, motionPhase, predecessor, previousCandidate, previousClearance, clearance,
+                            previousPalmClearance, palmClearance);
+                }
+                safetyProjectionNanos += System.nanoTime() - started; safetySolves++;
+                projectionMemo.put(key, result);
+            } else safetyMemoHits++;
+            safetyTrace.put(Integer.valueOf(frame), frame + "," + turn.phaseNameAt(frame) + "," + weight + ","
+                    + clearance + "," + result.before.minimum() + "," + result.after.minimum() + ","
+                    + result.maxCorrectionDegrees + "," + result.cleared + "," + palmClearance + "," + result.before.fingerPalm + "," + result.after.fingerPalm
+                    + "," + result.after.handsToTorso + "," + result.after.handsToUpperArms + "," + result.after.tabletop
+                    + "," + result.after.upperArmsToTorso + "," + result.after.upperArmsToTable);
+            if (!result.cleared) {
+                writeSafetyTrace(turn);
+                Files.write(new File(evidenceDirectory, "hand-failed-" + actor + "-" + frame + ".txt").toPath(),
+                        ("candidate=" + target + "\nprevious=" + predecessor + "\nprojected=" + result.pose
+                        + "\nbase=" + base + "\npreviousCandidate=" + previousCandidate
+                        + "\nweight=" + weight + "\npreviousClearance=" + previousClearance + "\nclearance=" + clearance
+                        + "\npreviousFingerPalmClearance=" + previousPalmClearance + "\nfingerPalmClearance=" + palmClearance + "\n").getBytes(StandardCharsets.UTF_8));
+                throw new IllegalStateException("Hand clearance unresolved actor=" + actor + " event=" + turn.eventId
+                        + " frame=" + frame + " phase=" + turn.phaseNameAt(frame) + " required=" + clearance
+                        + " measured=" + result.after.minimum() + " palm_required=" + palmClearance + " palm_measured=" + result.after.fingerPalm
+                        + " torso=" + result.after.handsToTorso + " upper_arm=" + result.after.handsToUpperArms + " table=" + result.after.tabletop
+                        + " upper_arm_torso=" + result.after.upperArmsToTorso + " upper_arm_table=" + result.after.upperArmsToTable);
+            }
+            safePoses.put(Integer.valueOf(frame), result.pose);
+            candidatePoses.put(Integer.valueOf(frame), Collections.unmodifiableMap(target));
+            requiredClearances.put(Integer.valueOf(frame), Double.valueOf(clearance));
+            requiredFingerPalmClearances.put(Integer.valueOf(frame), Double.valueOf(palmClearance));
+            return result.pose;
+        }
+
+        private static boolean sameArmPose(Map<String, Double> left, Map<String, Double> right) {
+            if (!left.keySet().equals(right.keySet())) return false;
+            for (String joint : left.keySet())
+                if (Math.abs(left.get(joint).doubleValue() - right.get(joint).doubleValue()) > 1e-6) return false;
+            return true;
+        }
+
+        private void writeSafetyTrace(MeaningGesture.Turn turn) throws Exception {
+            if (evidenceDirectory != null) Files.write(new File(evidenceDirectory,
+                    "hand-raw-" + actor + "-" + turn.firstRawFrame() + ".txt").toPath(),
+                    turn.rawTrace().getBytes(StandardCharsets.UTF_8));
+            if (!HAND_SAFETY || evidenceDirectory == null) return;
+            StringBuilder trace = new StringBuilder("frame,phase,weight,required,before,after,correction_degrees,cleared,finger_palm_required,finger_palm_before,finger_palm_after,torso,upper_arm,table,upper_arm_torso,upper_arm_table\n");
+            for (String row : safetyTrace.values()) trace.append(row).append('\n');
+            // Actor plus first frame avoids using transcript-controlled text as a path.
+            Files.write(new File(evidenceDirectory, "hand-safety-" + actor + "-" + turn.firstRawFrame() + ".csv").toPath(),
+                    trace.toString().getBytes(StandardCharsets.UTF_8));
+            StringBuilder poses = new StringBuilder();
+            for (Map.Entry<Integer, Map<String, Double>> entry : safePoses.entrySet()) poses.append(entry.getKey())
+                    .append("\tcandidate=").append(candidatePoses.get(entry.getKey())).append("\tprojected=").append(entry.getValue()).append('\n');
+            Files.write(new File(evidenceDirectory, "hand-poses-" + actor + "-" + turn.firstRawFrame() + ".txt").toPath(),
+                    poses.toString().getBytes(StandardCharsets.UTF_8));
         }
         private void applyStaticArms(Object frame, Class<?> types) throws Exception {
             setDegrees(frame, types, "l_shoulder_flexion", pose.lShoulderFlexion); setDegrees(frame, types, "r_shoulder_flexion", pose.rShoulderFlexion);
@@ -622,28 +974,39 @@ public final class SeatedScene {
          * channels after binding.  The later arm-only batch cannot overwrite
          * root, legs, neck/gaze, face, lips, or blink frames.
          */
-        private void replayCapturedArms(MeaningGesture.Turn turn) throws Exception {
+        private void replayCapturedArms(MeaningGesture.Turn turn, boolean refresh) throws Exception {
+            long started = System.nanoTime();
             if (!turn.hasRawFrames()) return;
-            int from = turn.replayStartFrame(currentFrame());
-            int to = turn.restoreEndFrame();
+            int now = currentFrame();
+            int from = turn.replayStartFrame(now);
+            if (!refresh && !safePoses.isEmpty()) from = Math.max(from, safePoses.lastKey().intValue() + 1);
+            int to = Math.min(turn.restoreEndFrame(), now + ARM_LOOKAHEAD_FRAMES);
             if (from < 0 || to < from) return;
             if (to - from > 520) throw new IllegalStateException("Meaning arm replay exceeds bounded frame range");
+            if (HAND_SAFETY && safePoses.isEmpty()) {
+                int opening = Math.max(0, turn.firstRawFrame() + MeaningGesture.BLEND_FRAMES - from);
+                System.out.println("GMIT_HAND_SAFETY opening actor=" + actor + " event=" + turn.eventId + " visible_frames=" + opening);
+                if (from > turn.firstRawFrame() + MeaningGesture.UNCLASP_FRAMES)
+                    throw new IllegalStateException("Meaning arm frames arrived after the unclasp window for " + actor);
+            }
             Class<?> frameClass = loader.loadClass("greta.core.animation.mpeg4.bap.BAPFrame");
             Constructor<?> constructor = frameClass.getConstructor(Integer.TYPE);
             Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
             List<Object> output = new ArrayList<Object>();
+            safePoses.tailMap(Integer.valueOf(from), true).clear();
+            candidatePoses.tailMap(Integer.valueOf(from), true).clear();
+            requiredClearances.tailMap(Integer.valueOf(from), true).clear();
+            requiredFingerPalmClearances.tailMap(Integer.valueOf(from), true).clear();
+            safetyTrace.tailMap(Integer.valueOf(from), true).clear();
             for (int number = from; number <= to; number++) {
                 Object armFrame = constructor.newInstance(number);
-                Map<String, Double> emitted = new LinkedHashMap<String, Double>();
-                for (String joint : ARM_JOINTS) {
-                    double base = armBase(joint);
-                    double value = turn.valueAt(joint, number, base);
-                    setDegrees(armFrame, types, joint, value); emitted.put(joint, Double.valueOf(value));
-                }
+                Map<String, Double> emitted = projectArms(turn, number);
+                for (String joint : ARM_JOINTS) setDegrees(armFrame, types, joint, emitted.get(joint).doubleValue());
                 turn.recordEmitted(number, emitted);
                 output.add(armFrame);
             }
             invoke(avatar, "performBAPFrames", output, newID());
+            safetyMaxBatchNanos = Math.max(safetyMaxBatchNanos, System.nanoTime() - started);
         }
         private int safeCurrentFrame() {
             try { return currentFrame(); }

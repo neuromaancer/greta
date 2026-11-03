@@ -4,12 +4,21 @@
     <!-- Seat metadata is consumed by SeatedScene; values are meters/degrees. -->
     <!-- Per-avatar arm angles lower the elbows and retain the clasp with coordinated tabletop hand placement. -->
     <!-- Finger flexion, staggered hand heights, and folded thumbs form a fixed clasp, independent of face/lip/blink channels. -->
-    <seat actor_id="facilitator" x="0.0" z="-0.78" yaw_degrees="0.0"
+    <seat actor_id="facilitator" gesture_style="balanced" gesture_release_lead="0.3" x="0.0" z="-0.78" yaw_degrees="0.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
-          l_shoulder_flexion_degrees="-42.8999" r_shoulder_flexion_degrees="-42.7657" l_shoulder_abduct_degrees="31.0169" r_shoulder_abduct_degrees="-30.3601"
-          l_elbow_flexion_degrees="-68.8448" r_elbow_flexion_degrees="-70.5434" l_elbow_twisting_degrees="-19.4246" r_elbow_twisting_degrees="18.8203"
+          l_shoulder_flexion_degrees="-47.6499" r_shoulder_flexion_degrees="-47.7157" l_shoulder_abduct_degrees="38.5169" r_shoulder_abduct_degrees="-38.0601"
+          l_elbow_flexion_degrees="-72.3448" r_elbow_flexion_degrees="-73.7934" l_elbow_twisting_degrees="-19.4246" r_elbow_twisting_degrees="18.8203"
           l_wrist_flexion_degrees="36.7536" r_wrist_flexion_degrees="-36.1362" l_wrist_pivot_degrees="29.7643" r_wrist_pivot_degrees="30.9144"
           l_wrist_twisting_degrees="32.0749" r_wrist_twisting_degrees="-31.0576">
+        <!-- MeaningMiner-only seated workspace; the resting clasp stays unchanged. -->
+        <gesture-arm-offset name="l_shoulder_flexion" degrees="-0.053867"/>
+        <gesture-arm-offset name="l_shoulder_abduct" degrees="-4.051841"/>
+        <gesture-arm-offset name="l_elbow_flexion" degrees="4.284817"/>
+        <gesture-arm-offset name="r_shoulder_flexion" degrees="-6.916158"/>
+        <gesture-arm-offset name="r_shoulder_abduct" degrees="-25.724522"/>
+        <gesture-arm-offset name="r_elbow_flexion" degrees="5.637619"/>
+        <gesture-arm-offset name="l_shoulder_twisting" degrees="21.730068"/>
+        <gesture-arm-offset name="r_shoulder_twisting" degrees="-16.177429"/>
         <arm-joint name="l_shoulder_twisting" degrees="-21.8308"/>
         <arm-joint name="r_shoulder_twisting" degrees="21.1745"/>
         <arm-joint name="l_index1_flexion" degrees="-25.0"/>
@@ -47,12 +56,20 @@
         <arm-joint name="l_thumb1_twisting" degrees="21.92"/>
         <arm-joint name="r_thumb1_twisting" degrees="2.85"/>
     </seat>
-    <seat actor_id="patient-a" x="-1.02" z="0.0" yaw_degrees="50.0"
+    <seat actor_id="patient-a" gesture_style="reserved" x="-1.02" z="0.0" yaw_degrees="50.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
-          l_shoulder_flexion_degrees="-37.3944" r_shoulder_flexion_degrees="-36.5983" l_shoulder_abduct_degrees="18.6398" r_shoulder_abduct_degrees="-23.8147"
-          l_elbow_flexion_degrees="-68.0696" r_elbow_flexion_degrees="-72.8450" l_elbow_twisting_degrees="-16.4085" r_elbow_twisting_degrees="10.2293"
+          l_shoulder_flexion_degrees="-40.1944" r_shoulder_flexion_degrees="-40.2483" l_shoulder_abduct_degrees="22.6398" r_shoulder_abduct_degrees="-29.3647"
+          l_elbow_flexion_degrees="-72.0696" r_elbow_flexion_degrees="-76.4950" l_elbow_twisting_degrees="-16.4085" r_elbow_twisting_degrees="10.2293"
           l_wrist_flexion_degrees="31.8851" r_wrist_flexion_degrees="-30.1146" l_wrist_pivot_degrees="22.5739" r_wrist_pivot_degrees="24.1729"
           l_wrist_twisting_degrees="17.0380" r_wrist_twisting_degrees="-17.6311">
+        <gesture-arm-offset name="l_shoulder_flexion" degrees="-10.054377"/>
+        <gesture-arm-offset name="l_shoulder_abduct" degrees="-5.276563"/>
+        <gesture-arm-offset name="l_elbow_flexion" degrees="12.063311"/>
+        <gesture-arm-offset name="r_shoulder_flexion" degrees="-14.107933"/>
+        <gesture-arm-offset name="r_shoulder_abduct" degrees="-21.525725"/>
+        <gesture-arm-offset name="r_elbow_flexion" degrees="15.872552"/>
+        <gesture-arm-offset name="l_shoulder_twisting" degrees="22.219357"/>
+        <gesture-arm-offset name="r_shoulder_twisting" degrees="-17.292295"/>
         <arm-joint name="l_shoulder_twisting" degrees="-24.5157"/>
         <arm-joint name="r_shoulder_twisting" degrees="26.2913"/>
         <arm-joint name="l_index1_flexion" degrees="-25.0"/>
@@ -90,12 +107,20 @@
         <arm-joint name="l_thumb1_twisting" degrees="59.81"/>
         <arm-joint name="r_thumb1_twisting" degrees="7.38"/>
     </seat>
-    <seat actor_id="patient-b" x="1.02" z="0.0" yaw_degrees="-50.0"
+    <seat actor_id="patient-b" gesture_style="animated" x="1.02" z="0.0" yaw_degrees="-50.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
-          l_shoulder_flexion_degrees="-46.4193" r_shoulder_flexion_degrees="-45.8030" l_shoulder_abduct_degrees="32.3375" r_shoulder_abduct_degrees="-31.9753"
-          l_elbow_flexion_degrees="-69.0243" r_elbow_flexion_degrees="-71.1525" l_elbow_twisting_degrees="-20.8514" r_elbow_twisting_degrees="19.7452"
+          l_shoulder_flexion_degrees="-52.2193" r_shoulder_flexion_degrees="-51.6530" l_shoulder_abduct_degrees="41.6375" r_shoulder_abduct_degrees="-41.4753"
+          l_elbow_flexion_degrees="-72.5243" r_elbow_flexion_degrees="-74.4525" l_elbow_twisting_degrees="-20.8514" r_elbow_twisting_degrees="19.7452"
           l_wrist_flexion_degrees="38.3587" r_wrist_flexion_degrees="-37.0089" l_wrist_pivot_degrees="31.8198" r_wrist_pivot_degrees="32.9146"
           l_wrist_twisting_degrees="32.3378" r_wrist_twisting_degrees="-31.0362">
+        <gesture-arm-offset name="l_shoulder_flexion" degrees="3.383970"/>
+        <gesture-arm-offset name="l_shoulder_abduct" degrees="-12.484339"/>
+        <gesture-arm-offset name="l_elbow_flexion" degrees="2.793940"/>
+        <gesture-arm-offset name="r_shoulder_flexion" degrees="1.590090"/>
+        <gesture-arm-offset name="r_shoulder_abduct" degrees="2.351906"/>
+        <gesture-arm-offset name="r_elbow_flexion" degrees="4.757773"/>
+        <gesture-arm-offset name="l_shoulder_twisting" degrees="23.210195"/>
+        <gesture-arm-offset name="r_shoulder_twisting" degrees="-20.174256"/>
         <arm-joint name="l_shoulder_twisting" degrees="-21.3248"/>
         <arm-joint name="r_shoulder_twisting" degrees="20.3662"/>
         <arm-joint name="l_index1_flexion" degrees="-25.0"/>

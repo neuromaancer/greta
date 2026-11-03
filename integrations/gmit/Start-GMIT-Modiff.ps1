@@ -2,7 +2,7 @@ param(
     [string]$Runtime,
     [string]$Replay,
     [switch]$Preview,
-    [switch]$MeaningMiner,
+    [switch]$MeaningMiner, [switch]$DisableHandSafety,
     [switch]$Muted,
     [string]$Distribution = 'Ubuntu',
     [string]$PythonPath = $env:GRETA_MODIFF_PYTHON,
@@ -121,6 +121,7 @@ try {
     if ($Replay) { $launch.Replay = $Replay } else { $launch.GroupMI = $true }
     if ($Preview) { $launch.Preview = $true }
     if ($MeaningMiner) { $launch.MeaningMiner = $true }
+    if ($DisableHandSafety) { $launch.DisableHandSafety = $true }
     if ($Muted) { $launch.Muted = $true }
     & $launcher @launch
     if (Test-Path -LiteralPath (Join-Path $run 'error.json')) {

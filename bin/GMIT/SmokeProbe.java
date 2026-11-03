@@ -535,6 +535,13 @@ public final class SmokeProbe {
             GazeModiffAdapter.install(objects, output);
         }
         if (Boolean.getBoolean("gmit.meaningminer.enabled")) {
+            Thread.sleep(2000);
+            SeatedScene.verifyPose();
+            SeatedScene.prepareHandSafety(output);
+            if (Boolean.getBoolean("gmit.meaningminer.geometryOnly")) {
+                log("COMPLETE mode=hand_geometry_capture speech=false");
+                return;
+            }
             title("Preparing MeaningMiner gestures for all three speakers");
             MeaningMinerBridge.install(objects, output);
             for (Turn turn : scenario.turns) {

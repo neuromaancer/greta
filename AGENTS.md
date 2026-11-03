@@ -162,6 +162,42 @@ without physical audio; `-Preview` only checks layout and semantic extraction.
 Library availability is not visual acceptance of every gesture or a collision
 solver, and English-path support does not establish other-language support.
 
+MeaningMiner collision protection uses `bin/GMIT/HandCollision.java` to snapshot the
+actual Autodesk skeleton and BAP mappers on the Ogre thread, then evaluate
+immutable numeric geometry without modifying native bones during search.
+Validate forward kinematics against native positions before playback. Check
+opposite hand, palm, finger, and forearm proxies and sampled transitions, plus
+independent torso, upper-arm, and tabletop boundaries. Derive the table from the
+rendered room node; preserve captured root rotation and add external translation
+exactly once. Body/table clearances must remain nonnegative, including opening
+and return, independently of intentional clasp finger contact. Exclude connected
+elbow pairs and only the documented proximal shoulder attachment region.
+Distinguish constant scene `gesture-arm-offset` retargeting (shoulder abduction,
+shoulder flexion/twisting, and elbow flexion) from per-frame correction (shoulder
+abduction/flexion and elbow flexion). Keep corrective deltas within 16 degrees
+and their per-frame changes within 6 degrees, including untouched sparse-seed
+axes. Preserve full stock wrist/finger targets
+after the 18-frame entry envelope, original raw frame numbers, and other
+behavior owners. Use the configured `gesture_release_lead` for coordinated
+finger release/workspace entry, and join its verified pose before reversing the nine-frame opening
+path into the clasp. The calibrated contact and air-gap thresholds are separate
+for finger-to-palm and the other proxies. Offline checks must include exactly
+the runtime's 74 arm/hand channels, including every finger pivot and twist.
+Unresolved projections fail rather than silently dropping a selected
+gesture. `-DisableHandSafety` isolates geometry correction; ordinary playback
+still leaves MeaningMiner disabled. Capsule checks are not mesh collision proof.
+Keep geometry snapshots, pose traces, and replay diagnostics under local ignored
+output; never accept arbitrary serialized snapshots as runtime input.
+The seat's `gesture_style` selects balanced/reserved/animated expressivity before
+Realizer and left/right proximal gains afterward. Preserve selected gesture
+references and word-marker links; style labels are not GMIT patient personas.
+Human review on 2026-11-03 rejected the earlier cross-hand-only candidate; that
+deployment was rolled back. The replacement adds body/table boundaries and styles.
+The user accepted its final seven-turn replay on the same date, reporting no
+obvious intersections and distinct actor styles; see `docs/gmit/MEANING_MINER.md`.
+Keep its numeric, runtime, and human acceptance evidence distinct, and report
+measured callback delays rather than claiming a 25 fps guarantee.
+
 ## Agent responsibilities
 
 Run at most two implementation workers concurrently:

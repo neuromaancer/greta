@@ -1,17 +1,43 @@
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
 /** Timing and arm-channel state for a real MeaningMiner gesture realization. */
 public final class MeaningGesture {
     static final int FRAME_MILLIS = 40;
-    static final int BLEND_FRAMES = 6;
-    static final int RETURN_FRAMES = 20; // 800 ms at Greta's 25 fps clock.
+    static final int BLEND_FRAMES = 18;
+    static final int RETURN_FRAMES = 24; // Ordered release, semantic handshape, and bounded reclasp.
+    static final int UNCLASP_FRAMES = 3;
+    static final int WORKSPACE_FRAMES = 9;
+    static final int RETURN_SEPARATED_FRAMES = 12;
+    static final int RECLASP_CLEARANCE_FADE_FRAMES = 5;
+    static final int RECLASP_BASELINE_CONTACT_FRAMES = 3;
     static final int MAX_RAW_FRAMES = 1000;
     static final double SHOULDER_CLEARANCE_DEGREES = 6.0;
 
     private MeaningGesture() { }
+
+    /** Expressive variation retains the chosen schema, hands, and word markers. */
+    static final class Style {
+        final String name;
+        final double leftGain, rightGain, spatial, temporal, fluidity, power;
+        private Style(String name, double leftGain, double rightGain,
+                double spatial, double temporal, double fluidity, double power) {
+            this.name = name; this.leftGain = leftGain; this.rightGain = rightGain;
+            this.spatial = spatial; this.temporal = temporal;
+            this.fluidity = fluidity; this.power = power;
+        }
+        static Style named(String name) {
+            if ("legacy".equals(name)) return new Style(name, 1, 1, .5, .5, .5, .5);
+            if ("balanced".equals(name)) return new Style(name, 1, 1, .5, .5, .65, .4);
+            if ("reserved".equals(name)) return new Style(name, .65, .85, .35, .4, .4, .25);
+            if ("animated".equals(name)) return new Style(name, 1.35, 1.15, .65, .65, .7, .55);
+            throw new IllegalArgumentException("Unknown seated gesture style: " + name);
+        }
+    }
 
     static int frameAtOrAfter(long millis) {
         if (millis < 0 || millis > Integer.MAX_VALUE * (long)FRAME_MILLIS)
@@ -27,6 +53,8 @@ public final class MeaningGesture {
     static final class Turn {
         final String actor, eventId;
         private final double gain;
+        private final Style style;
+        private final double releaseLead;
         // Sort by BAP frame number: a later-arriving queued batch must never
         // erase or hide an earlier scheduled pose.
         private final Map<Integer, Map<String, Double>> raw = new TreeMap<Integer, Map<String, Double>>();
@@ -34,19 +62,51 @@ public final class MeaningGesture {
         // lexicon's standing neutral used to retarget shoulders/elbows to the
         // seated clasp; wrists and fingers retain their stock handshape.
         private final Map<String, Double> stockNeutral = new LinkedHashMap<String, Double>();
+        // Optional actor-specific workspace fit. It is constant for this
+        // semantic turn and never changes the captured wrist/finger handshape.
+        private final Map<String, Double> semanticArmOffsets;
         // Exact values submitted to the avatar after seated adaptation. Raw
         // capture may continue after a frame has already been queued, so this
         // is intentionally separate from the mutable raw plan used for future
         // frames.
         private final Map<Integer, Map<String, Double>> emitted = new TreeMap<Integer, Map<String, Double>>();
+        // Optional controller-owned reverse path. It is deliberately separate
+        // from captured semantic BAP frames and remains immutable after bind.
+        private List<Map<String, Double>> handReturnPath;
+        private List<Double> handReturnClearance;
         private int audioStartFrame = -1, audioEndFrame = -1, firstRawFrame = -1, lastRawFrame = -1;
         private boolean bound;
 
         Turn(String actor, String eventId, double gain) {
+            this(actor, eventId, gain, Collections.<String, Double>emptyMap());
+        }
+
+        Turn(String actor, String eventId, double gain, Map<String, Double> semanticArmOffsets) {
+            this(actor, eventId, gain, semanticArmOffsets, Style.named("legacy"));
+        }
+
+        Turn(String actor, String eventId, double gain, Map<String, Double> semanticArmOffsets, Style style) {
+            this(actor, eventId, gain, semanticArmOffsets, style, 0);
+        }
+
+        Turn(String actor, String eventId, double gain, Map<String, Double> semanticArmOffsets, Style style, double releaseLead) {
             if (blank(actor) || blank(eventId)) throw new IllegalArgumentException("Meaning turn needs actor and event id");
             if (Double.isNaN(gain) || Double.isInfinite(gain) || gain < 0 || gain > 2)
                 throw new IllegalArgumentException("Meaning seated arm gain must be in [0,2]");
             this.actor = actor; this.eventId = eventId; this.gain = gain;
+            if (style == null) throw new IllegalArgumentException("Gesture style is required");
+            this.style = style;
+            if (Double.isNaN(releaseLead) || Double.isInfinite(releaseLead) || releaseLead < 0 || releaseLead > .5)
+                throw new IllegalArgumentException("Workspace release lead must be in [0,0.5]");
+            this.releaseLead = releaseLead;
+            Map<String, Double> copiedOffsets = new LinkedHashMap<String, Double>();
+            if (semanticArmOffsets != null) for (Map.Entry<String, Double> entry : semanticArmOffsets.entrySet()) {
+                String joint = entry.getKey(); Double value = entry.getValue();
+                if (!isSemanticOffsetJoint(joint) || value == null || Double.isNaN(value.doubleValue()) || Double.isInfinite(value.doubleValue()) || Math.abs(value.doubleValue()) > 35)
+                    throw new IllegalArgumentException("Semantic arm offsets require bounded shoulder or elbow flexion channels");
+                copiedOffsets.put(joint, Double.valueOf(value.doubleValue()));
+            }
+            this.semanticArmOffsets = Collections.unmodifiableMap(copiedOffsets);
         }
 
         synchronized void capture(int frame, Map<String, Double> values) {
@@ -78,6 +138,40 @@ public final class MeaningGesture {
             bound = true;
         }
 
+        /** Sets the optional controller-verified opening path before audio timing is bound. */
+        synchronized void setHandReturnPath(List<Map<String, Double>> poses, List<Double> clearanceWeights) {
+            if (bound) throw new IllegalStateException("Hand return path must be set before bind");
+            if (poses == null || clearanceWeights == null) {
+                if (poses != null || clearanceWeights != null) throw new IllegalArgumentException("Hand return poses and clearance weights are paired");
+                handReturnPath = null; handReturnClearance = null; return;
+            }
+            int maximumPathLength = RETURN_FRAMES - RETURN_SEPARATED_FRAMES;
+            if (poses.size() < 2 || poses.size() != clearanceWeights.size() || poses.size() > maximumPathLength)
+                throw new IllegalArgumentException("Hand return path needs matching base and separated poses within the reclasp duration");
+            List<Map<String, Double>> copiedPoses = new ArrayList<Map<String, Double>>();
+            List<Double> copiedWeights = new ArrayList<Double>();
+            for (int index = 0; index < poses.size(); index++) {
+                Map<String, Double> source = poses.get(index);
+                Double weight = clearanceWeights.get(index);
+                if (source == null || source.isEmpty() || weight == null || Double.isNaN(weight.doubleValue()) || Double.isInfinite(weight.doubleValue())
+                        || weight.doubleValue() < 0 || weight.doubleValue() > 1)
+                    throw new IllegalArgumentException("Hand return path requires finite poses and clearance weights in [0,1]");
+                Map<String, Double> copy = new LinkedHashMap<String, Double>();
+                for (Map.Entry<String, Double> entry : source.entrySet()) {
+                    String joint = entry.getKey(); Double value = entry.getValue();
+                    if (!isReturnPathChannel(joint) || value == null || Double.isNaN(value.doubleValue()) || Double.isInfinite(value.doubleValue()))
+                        throw new IllegalArgumentException("Hand return path must contain finite arm/hand channels");
+                    copy.put(joint, Double.valueOf(value.doubleValue()));
+                }
+                if (!copiedPoses.isEmpty() && !copiedPoses.get(0).keySet().equals(copy.keySet()))
+                    throw new IllegalArgumentException("Hand return path poses must use identical arm/hand channels");
+                copiedPoses.add(Collections.unmodifiableMap(copy));
+                copiedWeights.add(Double.valueOf(weight.doubleValue()));
+            }
+            handReturnPath = Collections.unmodifiableList(copiedPoses);
+            handReturnClearance = Collections.unmodifiableList(copiedWeights);
+        }
+
         synchronized boolean isBound() { return bound; }
         synchronized boolean hasRawFrames() { return firstRawFrame >= 0; }
         synchronized int firstRawFrame() { return firstRawFrame; }
@@ -89,30 +183,180 @@ public final class MeaningGesture {
         synchronized boolean activeAt(int frame) { return bound && firstRawFrame >= 0 && frame >= firstRawFrame && frame <= restoreEndFrame(); }
         synchronized boolean restoredAt(int frame) { return bound && restoreEndFrame() >= 0 && frame > restoreEndFrame(); }
 
+        /** Deterministic, text-free diagnostic of captured BAP values and audio frame bounds. */
+        synchronized String rawTrace() {
+            StringBuilder trace = new StringBuilder();
+            trace.append("audio_start_frame=").append(audioStartFrame).append('\n');
+            trace.append("audio_end_frame=").append(audioEndFrame).append('\n');
+            for (Map.Entry<Integer, Map<String, Double>> frame : raw.entrySet()) {
+                trace.append(frame.getKey().intValue()).append('|');
+                boolean first = true;
+                for (Map.Entry<String, Double> joint : new TreeMap<String, Double>(frame.getValue()).entrySet()) {
+                    if (!first) trace.append(',');
+                    trace.append(joint.getKey()).append('=').append(Double.toString(joint.getValue().doubleValue()));
+                    first = false;
+                }
+                trace.append('\n');
+            }
+            return trace.toString();
+        }
+
+        /**
+         * Produces one complete arm/hand pose from the captured stock frame.
+         * The opening first releases the clasp before the stock handshape can
+         * move across the other hand. The return first moves to separated
+         * neutral hands, then restores the accepted clasp.
+         */
+        synchronized Map<String, Double> poseAt(int frame, Map<String, Double> bases) {
+            Map<String, Double> pose = new LinkedHashMap<String, Double>();
+            if (bases == null) return pose;
+            for (Map.Entry<String, Double> entry : bases.entrySet()) {
+                String joint = entry.getKey();
+                double base = entry.getValue().doubleValue();
+                pose.put(joint, Double.valueOf(valueAt(joint, frame, base)));
+            }
+            return pose;
+        }
+
+        /** Backwards-compatible single-channel view used by focused tests. */
         synchronized double valueAt(String joint, int frame, double seatedBase) {
             if (!activeAt(frame)) return seatedBase;
             Double rawValue = valueAtOrBefore(joint, frame);
-            if (rawValue == null) return seatedBase;
-            double displacement = rawValue.doubleValue() - seatedBase;
+            // A semantic BAP batch may mask only part of a hand.  Missing
+            // channels keep their calibrated target, but fingers still pass
+            // through the shared release/reclasp timeline.
+            double semantic = semanticValue(joint, rawValue, frame, seatedBase);
+            int first = firstRawFrame;
+            int semanticStart = semanticStartFrame();
+            if (frame < semanticStart) {
+                int offset = frame - first;
+                if (offset <= UNCLASP_FRAMES) {
+                    if (isFinger(joint)) return interpolate(seatedBase, 0, smooth(offset / (double) UNCLASP_FRAMES));
+                    if (isProximalArm(joint)) return interpolate(seatedBase, workspaceOffsetValue(joint, seatedBase),
+                            releaseLead * smooth(offset / (double) UNCLASP_FRAMES));
+                    return seatedBase;
+                }
+                if (offset <= WORKSPACE_FRAMES) {
+                    if (isProximalArm(joint)) return interpolate(seatedBase, workspaceOffsetValue(joint, seatedBase),
+                            releaseLead + (1 - releaseLead) * smooth((offset - UNCLASP_FRAMES) / (double) (WORKSPACE_FRAMES - UNCLASP_FRAMES)));
+                    return isFinger(joint) ? 0 : seatedBase;
+                }
+                double prepared = isProximalArm(joint) ? workspaceOffsetValue(joint, seatedBase)
+                        : (isFinger(joint) ? 0 : seatedBase);
+                return interpolate(prepared, semantic,
+                        smooth((offset - WORKSPACE_FRAMES) / (double) (BLEND_FRAMES - WORKSPACE_FRAMES)));
+            }
+            int returnStart = returnStartFrame();
+            if (frame < returnStart) return semantic;
+            int reclaspStart = reclaspStartFrame();
+            if (frame < reclaspStart) {
+                double separated = returnJoinValue(joint, seatedBase);
+                return interpolate(semantic, separated,
+                        smooth((frame - returnStart + 1) / (double) RETURN_SEPARATED_FRAMES));
+            }
+            if (frame < restoreEndFrame()) {
+                if (handReturnPath != null) return returnPathValue(joint,
+                        Math.max(0, handReturnPath.size() - 1 - (frame - reclaspStart)), seatedBase);
+                double separated = separatedBase(joint, seatedBase);
+                return interpolate(separated, seatedBase,
+                        smooth((frame - reclaspStart) / (double) (RETURN_FRAMES - RETURN_SEPARATED_FRAMES)));
+            }
+            return seatedBase;
+        }
+
+        /**
+         * Scalar air-gap request for paired-hand correction. Zero retains the
+         * accepted calibrated-contact threshold; it does not claim any hand
+         * topology is collision-free. Motion ownership remains separate.
+         */
+        synchronized double clearanceWeightAt(int frame) {
+            if (!activeAt(frame) || frame >= restoreEndFrame()) return 0;
+            int semanticStart = semanticStartFrame();
+            if (frame < semanticStart) {
+                int releaseOffset = frame - firstRawFrame;
+                if (releaseOffset <= UNCLASP_FRAMES) return 0;
+                if (releaseOffset <= WORKSPACE_FRAMES)
+                    return smooth((releaseOffset - UNCLASP_FRAMES) / (double) (WORKSPACE_FRAMES - UNCLASP_FRAMES));
+                return 1.0;
+            }
+            int reclaspStart = reclaspStartFrame();
+            if (frame < reclaspStart) return handReturnClearance == null ? 1.0
+                    : handReturnClearance.get(handReturnClearance.size() - 1).doubleValue();
+            if (handReturnClearance != null)
+                return handReturnClearance.get(Math.max(0, handReturnClearance.size() - 1 - (frame - reclaspStart))).doubleValue();
+            int reclaspOffset = frame - reclaspStart;
+            if (reclaspOffset >= RECLASP_CLEARANCE_FADE_FRAMES) return 0;
+            return 1.0 - smooth(reclaspOffset / (double) (RECLASP_CLEARANCE_FADE_FRAMES - 1));
+        }
+
+        synchronized String phaseNameAt(int frame) {
+            if (!bound || firstRawFrame < 0) return "static";
+            if (!activeAt(frame)) return frame > restoreEndFrame() ? "restored" : "static";
+            if (frame < semanticStartFrame()) return "unclasp";
+            if (frame < returnStartFrame()) return "semantic";
+            if (frame < reclaspStartFrame()) return "return-separated";
+            if (frame < restoreEndFrame()) return "reclasp";
+            return "restored";
+        }
+
+        private double semanticValue(String joint, Double rawValue, int frame, double seatedBase) {
+            // A partial BAP frame may introduce this joint only later. Its
+            // future stock-neutral value must not create a phantom delta in
+            // an earlier frame with no value for this channel.
+            if (rawValue == null) return workspaceOffsetValue(joint, seatedBase);
+            double raw = rawValue.doubleValue();
+            double displacement = raw - seatedBase;
             if (isProximalArm(joint)) {
                 Double neutral = stockNeutral.get(joint);
-                if (neutral != null) displacement = rawValue.doubleValue() - neutral.doubleValue();
-                displacement *= gain;
+                if (neutral != null) displacement = raw - neutral.doubleValue();
+                displacement *= gain * (joint.startsWith("l_") ? style.leftGain : style.rightGain);
             }
             // Gain is deliberately proximal-only: semantic wrist/finger
             // handshapes remain the stock lexicon's full-strength motion.
-            double weight = blendWeight(frame);
-            double seated = seatedBase + displacement * weight;
-            if ("l_shoulder_abduct".equals(joint)) seated += SHOULDER_CLEARANCE_DEGREES * weight * sideMotionWeight("l_", frame);
-            if ("r_shoulder_abduct".equals(joint)) seated -= SHOULDER_CLEARANCE_DEGREES * weight * sideMotionWeight("r_", frame);
-            // The seated calibration uses negative shoulder/elbow flexion for
-            // tabletop lift. A positive stock delta lowers a free hand under
-            // the table, so retain the calibrated maximum only. This clips
-            // downward standing semantics to the available tabletop range; it
-            // is deliberately not presented as collision solving.
-            if (isTabletopFlexion(joint)) seated = Math.min(seated, seatedBase);
-            return seated;
+            double seated = seatedBase + displacement;
+            if ("legacy".equals(style.name)) {
+                if ("l_shoulder_abduct".equals(joint)) seated += SHOULDER_CLEARANCE_DEGREES * sideMotionWeight("l_", frame);
+                if ("r_shoulder_abduct".equals(joint)) seated -= SHOULDER_CLEARANCE_DEGREES * sideMotionWeight("r_", frame);
+            }
+            // Legacy callers retain their old angular restriction. Styled
+            // motion uses explicit body/table geometry instead: the sign of a
+            // joint angle alone does not determine world-space hand clearance.
+            if ("legacy".equals(style.name) && isTabletopFlexion(joint)) seated = Math.min(seated, seatedBase);
+            return workspaceOffsetValue(joint, seated);
         }
+
+        private double workspaceOffsetValue(String joint, double seated) {
+            Double offset = semanticArmOffsets.get(joint);
+            if (offset == null) return seated;
+            // Apply the seated workspace fit after stock retargeting. Its
+            // safety is established by geometry, not by the offset's sign.
+            return seated + offset.doubleValue();
+        }
+
+        private int semanticStartFrame() { return firstRawFrame + BLEND_FRAMES; }
+        synchronized int returnStartFrame() { return Math.max(lastRawFrame + 1, audioEndFrame); }
+        synchronized int reclaspStartFrame() { return returnStartFrame() + RETURN_SEPARATED_FRAMES; }
+        private double returnJoinValue(String joint, double seatedBase) {
+            if (handReturnPath == null) return separatedBase(joint, seatedBase);
+            return returnPathValue(joint, handReturnPath.size() - 1, seatedBase);
+        }
+        private double returnPathValue(String joint, int index, double seatedBase) {
+            Double target = handReturnPath.get(index).get(joint);
+            return target == null ? separatedBase(joint, seatedBase) : target.doubleValue();
+        }
+        private static double separatedBase(String joint, double seatedBase) {
+            return isFinger(joint) ? 0.0 : seatedBase;
+        }
+        private static boolean isHandChannel(String joint) { return isFinger(joint) || joint.indexOf("_wrist_") >= 1; }
+        private static boolean isReturnPathChannel(String joint) {
+            return joint != null && (isProximalArm(joint) || isHandChannel(joint));
+        }
+        private static boolean isFinger(String joint) {
+            return joint.indexOf("_thumb") >= 1 || joint.indexOf("_index") >= 1
+                    || joint.indexOf("_middle") >= 1 || joint.indexOf("_ring") >= 1
+                    || joint.indexOf("_pinky") >= 1;
+        }
+        private static double interpolate(double from, double to, double weight) { return from + (to - from) * Math.max(0.0, Math.min(1.0, weight)); }
 
         synchronized boolean hasValueAt(String joint, int frame) { return activeAt(frame) && valueAtOrBefore(joint, frame) != null; }
 
@@ -136,13 +380,6 @@ public final class MeaningGesture {
                 if (candidate != null) found = candidate;
             }
             return found;
-        }
-
-        private double blendWeight(int frame) {
-            if (frame <= lastRawFrame) return smooth(Math.min(1.0, Math.max(0.0, (frame - firstRawFrame) / (double)BLEND_FRAMES)));
-            int returnStart = Math.max(lastRawFrame + 1, audioEndFrame);
-            if (frame < returnStart) return 1.0;
-            return smooth(Math.max(0.0, 1.0 - (frame - returnStart + 1) / (double)RETURN_FRAMES));
         }
 
         /**
@@ -172,6 +409,13 @@ public final class MeaningGesture {
         private static boolean isProximalArm(String joint) {
             return (joint.startsWith("l_") || joint.startsWith("r_"))
                     && (joint.indexOf("_shoulder_") >= 1 || joint.indexOf("_elbow_") >= 1);
+        }
+
+        private static boolean isSemanticOffsetJoint(String joint) {
+            return "l_shoulder_abduct".equals(joint) || "r_shoulder_abduct".equals(joint)
+                    || "l_shoulder_flexion".equals(joint) || "r_shoulder_flexion".equals(joint)
+                    || "l_shoulder_twisting".equals(joint) || "r_shoulder_twisting".equals(joint)
+                    || "l_elbow_flexion".equals(joint) || "r_elbow_flexion".equals(joint);
         }
 
         private static boolean isTabletopFlexion(String joint) {

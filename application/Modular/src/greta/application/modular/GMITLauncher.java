@@ -70,7 +70,7 @@ final class GMITLauncher {
         for (Path required : Arrays.asList(bin.resolve("Modular.jar"), scene, scenario,
                 helpers.resolve("SmokeProbe.java"), helpers.resolve("SeatedScene.java"),
                 helpers.resolve("ListenerGaze.java"), helpers.resolve("GazeModiffAdapter.java"),
-                helpers.resolve("MeaningMinerBridge.java"), helpers.resolve("MeaningGesture.java"),
+                helpers.resolve("MeaningMinerBridge.java"), helpers.resolve("MeaningGesture.java"), helpers.resolve("HandCollision.java"),
                 bin.resolve("Environments/GMIT/group-mi-room.xml"))) {
             if (!Files.isRegularFile(required)) {
                 throw new IllegalStateException("Set Working Directory to the complete runtime bin and deploy the GMIT allowlist. Missing: " + required);
@@ -92,7 +92,7 @@ final class GMITLauncher {
                 "-classpath", System.getProperty("java.class.path"), "-d", output.toString(), helpers.resolve("SmokeProbe.java").toString(),
                 helpers.resolve("SeatedScene.java").toString(), helpers.resolve("ListenerGaze.java").toString(),
                 helpers.resolve("GazeModiffAdapter.java").toString(), helpers.resolve("MeaningMinerBridge.java").toString(),
-                helpers.resolve("MeaningGesture.java").toString()), bin, output, "compile", 30);
+                helpers.resolve("MeaningGesture.java").toString(), helpers.resolve("HandCollision.java").toString()), bin, output, "compile", 30);
         if (replay != null) {
             runOwned(Arrays.asList(java.toString(), "-cp", output + File.pathSeparator + System.getProperty("java.class.path"),
                     "SmokeProbe", "--validate", scenario.toString()), bin, output, "validate", 30);
@@ -115,7 +115,7 @@ final class GMITLauncher {
             List<String> command = new ArrayList<>();
             command.add(java.toString());
             command.add("-Djava.library.path=" + bin.resolve("Player/Lib/External/Win64"));
-            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms", "gmit.modiff.dir", "gmit.meaningminer.enabled", "gmit.audio.muted")) {
+            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms", "gmit.modiff.dir", "gmit.meaningminer.enabled", "gmit.meaningminer.handSafety", "gmit.audio.muted")) {
                 if (System.getProperty(property) != null) command.add("-D" + property + "=" + System.getProperty(property));
             }
             // Keep the IDE's actual source-build classpath. Do not replace it with
