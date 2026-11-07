@@ -36,6 +36,8 @@ public final class ListenerGazeTest {
             require(plan.nodCount() <= 1, "listener nods never overlap");
             require(plan.nodCount() == 0 || plan.nodCount() == 1, "at most one stochastic nod is scheduled");
             for (ListenerGaze.TimingEvent event : plan.events()) if (event.nod) {
+                require(event.duration * 40 >= 1000 && event.duration * 40 <= 1400,
+                        "listener backchannel remains visible for about one second");
                 require(event.start >= plan.listenerFrame + 20, "nod waits for listener yaw to settle");
                 int deadline = plan.handoffFrame < 0 ? plan.endFrame : plan.handoffFrame;
                 require(event.start + event.duration + 2 <= deadline, "nod finishes before interval end/handoff");
@@ -59,6 +61,30 @@ public final class ListenerGazeTest {
                     "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0).nodCount();
             require(nods >= 25 && nods <= 75,
                     "100 adjacent seeds produce a non-degenerate 50% backchannel gate: " + nods);
+            java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+            counts.put("facilitator", Integer.valueOf(0));
+            counts.put("patient-b", Integer.valueOf(2));
+            int facilitatorNods = 0;
+            for (long seed = 0; seed < 64; seed++) {
+                ListenerGaze.TimingPlan fair = ListenerGaze.planTiming(
+                        "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0, counts);
+                samePlan(fair, ListenerGaze.planTiming(
+                        "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0, counts));
+                for (ListenerGaze.TimingEvent event : fair.events()) if (event.nod) {
+                    require("facilitator".equals(event.actor), "less-used facilitator gets the listener opportunity");
+                    facilitatorNods++;
+                }
+            }
+            require(facilitatorNods > 0 && facilitatorNods < 64, "fair selection preserves occasional triggering");
+            counts.put("facilitator", Integer.valueOf(3));
+            for (long seed = 0; seed < 64; seed++) {
+                ListenerGaze.TimingPlan fair = ListenerGaze.planTiming(
+                        "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0, counts);
+                for (ListenerGaze.TimingEvent event : fair.events()) if (event.nod)
+                    require("patient-b".equals(event.actor), "priority follows counts rather than a fixed actor role");
+            }
+            require(counts.get("facilitator").intValue() == 3 && counts.get("patient-b").intValue() == 2,
+                    "planning does not mutate the caller's history snapshot");
         } else {
             for (long seed = 0; seed < 64; seed++) require(ListenerGaze.planTiming(
                     "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0).nodCount() == 0,

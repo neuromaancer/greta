@@ -19,10 +19,11 @@ episode through the existing round-robin evaluation wrapper.
 Training, batch evaluation, GMIT source edits, and runtime-repository commits
 remain outside this integration.
 
-An opt-in facilitator-only MODIFF-VQ engineering experiment now has a strict
-local CPU preflight and a gaze-selected virtual-AU bridge. It is separate from
-the accepted ordinary replay configuration. See [MODIFF_VQ.md](MODIFF_VQ.md)
-for the input approximations, startup, and verification limits.
+The earlier facilitator-only MODIFF-VQ experiment was retired from the active
+workflow at the user's request on November 7. Start current replays through
+`bin/GMIT/Start-GMIT.ps1`, without a MODIFF worker, WSL, or Python model loading.
+Its implementation and local checkpoint resources remain preserved; see the
+historical [MODIFF_VQ.md](MODIFF_VQ.md) record for its assumptions and limits.
 
 The opt-in [MeaningMiner extension](MEANING_MINER.md) sends each of the three
 actors' English semantic intentions through its own Planner and gesture lexicon.
@@ -47,7 +48,7 @@ these checks was 315 ms, so this is not a 25 fps guarantee or universal mesh
 collision proof. See the
 same record for geometry limits, deployment receipts, and final observations.
 
-The current November 7 source revision narrows MeaningMiner activation before
+The earlier November 7 conversational revision narrows MeaningMiner activation before
 Planner through each seat's `gesture_admission="ideational-main"` policy, while
 preserving raw extraction for audit and failing open when an ideational main
 anchor is unresolved. Gesture amplitude uses a 0.24 base seated gain and updated
@@ -69,9 +70,26 @@ overall conversational behavior, then the forward hand placement, tabletop
 contact, and final natural return without visible jitter. The final audible run
 observed 483 BAP samples and a largest queue batch of 41 ms; this is not a
 continuous-collision or 25 fps guarantee. The November 3 observations above are
-historical. The current session changes eight runtime paths through the existing
+historical. That revision changed eight runtime paths through the existing
 sixteen-file allowlist. Its receipt sequence and reverse-order recovery commands
 are recorded in [MEANING_MINER.md](MEANING_MINER.md#verification-record).
+
+The subsequent replay repair addresses the user's independent run, which
+stopped with a residual shoulder correction at the final rest. A bounded
+release-only tail reaches the exact rest without increasing the one-degree
+release limit or relaxing geometric checks. Patient B's right palm and fingers
+were recalibrated at the accepted horizontal position; the user accepted the
+new native static preview. Nods last 1.12 seconds and favor listening actors
+with fewer prior nods, including the facilitator, while retaining the seeded
+50% trigger and one-listener exclusivity. Current checks exclude MODIFF.
+The deployed audible replay completed seven turns and exact restorations,
+1,350 passing projected frames, and one nod per actor; the user confirmed that
+the hand placement, return, nods, speech, lips, and gaze were normal. Screenshot
+sampling now refreshes a bounded one-second arm queue and retains strict
+same-frame checks after initial submission. Seven runtime paths were updated
+through the unchanged sixteen-file allowlist, with originals retained.
+The separate repair evidence and runtime acceptance are recorded in
+[MEANING_MINER.md](MEANING_MINER.md#replay-repair-and-right-palm-calibration-2026-11-07).
 
 ## Baseline and ownership
 

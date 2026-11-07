@@ -24,9 +24,13 @@ public final class SmokeProbe {
     private static final Map<String, Object> objects = new LinkedHashMap<>();
     private static final Map<String, List<Object>> audio = new ConcurrentHashMap<>();
     private static final Set<String> meaningPlans = new HashSet<>();
+    private static final long MEANING_RESTORE_OBSERVATION_MILLIS = 100;
+    private static final long MEANING_WATCHDOG_GRACE_MILLIS = 1000;
     private static File output;
     private static Object captureTarget;
     private static volatile Throwable failure;
+    private static int diagnosticCaptureCount;
+    private static long diagnosticCaptureMaxMillis;
     private static String activeProvenance = "Synthetic authored dialogue";
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
 
@@ -303,6 +307,10 @@ public final class SmokeProbe {
         }
     }
     private static void capture(String name) throws Exception {
+        // Keep the bounded Meaning arm window ahead of an expensive readback.
+        // This is a no-op outside a bound MeaningMiner turn.
+        SeatedScene.observeMeaningGesture();
+        long captureStarted = System.currentTimeMillis();
         if (captureTarget == null) {
             Object player = objects.get("gmit-player");
             if (player == null) throw new IllegalStateException("Ogre player failed to load");
@@ -334,6 +342,8 @@ public final class SmokeProbe {
         for (int y = 0, i = 0; y < h; y++) for (int x = 0; x < w; x++, i += 3)
             img.setRGB(x, y, ((rgb[i] & 255) << 16) | ((rgb[i+1] & 255) << 8) | (rgb[i+2] & 255));
         ImageIO.write(img, "png", new File(output, name + ".png"));
+        diagnosticCaptureCount++;
+        diagnosticCaptureMaxMillis = Math.max(diagnosticCaptureMaxMillis, System.currentTimeMillis() - captureStarted);
     }
     private static void observeAudio(final String actor) throws Exception {
         audio.put(actor, new CopyOnWriteArrayList<>());
@@ -401,15 +411,19 @@ public final class SmokeProbe {
         long engineNow = ((Number)clock.invoke(null)).longValue();
         long remaining = end-engineNow;
         if (remaining < 0 || remaining > 15000) throw new IllegalStateException("Unexpected audio schedule");
-        long stop = System.currentTimeMillis()+remaining+turnGap*1000L+7000;
+        long stop = System.currentTimeMillis() + remaining + turnGap * 1000L
+                + MeaningGesture.MAX_DIRECT_RESTORE_AFTER_AUDIO_MILLIS
+                + MEANING_RESTORE_OBSERVATION_MILLIS + MEANING_WATCHDOG_GRACE_MILLIS;
         int frame = 0;
         boolean capturedSpeakerShift = false;
         boolean capturedHandoff = false;
         int meaningCapture = 0;
         while (true) {
             long restoreEnd = meaningTurn ? SeatedScene.meaningRestoreMillis(actor, scenarioTurn.eventId) : 0;
-            if (restoreEnd > end + 6000) throw new IllegalStateException("MeaningMiner return exceeds the bounded post-speech interval");
-            long observedEnd = Math.max(end + turnGap * 1000L, restoreEnd == 0 ? 0 : restoreEnd + 100);
+            if (restoreEnd > end + MeaningGesture.MAX_DIRECT_RESTORE_AFTER_AUDIO_MILLIS)
+                throw new IllegalStateException("MeaningMiner return exceeds the bounded post-speech interval");
+            long observedEnd = Math.max(end + turnGap * 1000L,
+                    restoreEnd == 0 ? 0 : restoreEnd + MEANING_RESTORE_OBSERVATION_MILLIS);
             if (((Number)clock.invoke(null)).longValue() >= observedEnd) break;
             if (caption != null) caption.checkCancelled();
             if (System.currentTimeMillis()>stop) throw new IllegalStateException("Greta audio clock stopped progressing");
@@ -626,6 +640,7 @@ public final class SmokeProbe {
                 if (remaining > 0) Thread.sleep(Math.min(100L, remaining));
             } while (System.currentTimeMillis() < holdUntil);
             GazeModiffAdapter.verify();
+            log("diagnostic_capture_summary count=" + diagnosticCaptureCount + " max_ms=" + diagnosticCaptureMaxMillis);
             if (scenario == null) log("COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation");
             else log("COMPLETE mode=" + ("synthetic-authored".equals(scenario.provenance) ? "synthetic_group_mi" : "recorded_replay") + " provenance=" + scenario.provenance + " session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation");
         } finally {

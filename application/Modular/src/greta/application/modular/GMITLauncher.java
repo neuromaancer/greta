@@ -128,7 +128,8 @@ final class GMITLauncher {
             command.addAll(Arrays.asList(replay == null ? "10" : "0", replay == null ? "3" : "1", replay == null ? "10" : "0", scenario.toString()));
             int turnsUpperBound = replay == null ? 16 : 256;
             int timeoutSeconds = 120 + turnsUpperBound * (10 + 15 + 5 + 2);
-            if (Boolean.getBoolean("gmit.meaningminer.enabled")) timeoutSeconds += 90 + turnsUpperBound * (30 + 6);
+            // Nine seconds covers the 8.240-second bounded direct restore and observation margin.
+            if (Boolean.getBoolean("gmit.meaningminer.enabled")) timeoutSeconds += 90 + turnsUpperBound * (30 + 9);
             runOwned(command, bin, output, "playback", timeoutSeconds);
         } finally {
             // The child has exited before restoration; native rendering threads

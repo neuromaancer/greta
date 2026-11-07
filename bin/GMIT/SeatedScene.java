@@ -35,7 +35,7 @@ public final class SeatedScene {
     private static final boolean ARMS = Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true"));
     private static final boolean MEANING_GESTURES = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.enabled", "false"));
     private static final boolean HAND_SAFETY = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.handSafety", "true"));
-    private static final int ARM_LOOKAHEAD_FRAMES = 12; // 480 ms; the playback observer pumps at 100 ms.
+    private static final int ARM_LOOKAHEAD_FRAMES = 25; // One second; diagnostic render capture can exceed the 100 ms pump cadence.
     private static final List<PoseController> CONTROLLERS = new ArrayList<PoseController>();
     private static volatile boolean installed;
     private static volatile Throwable poseFailure;
@@ -568,7 +568,7 @@ public final class SeatedScene {
                 HandCollision.Result result = handModel.correct(candidate, handBase, .5,
                         previous, previousCandidate, previousClearance, clearance, previousPalmClearance, palmClearance);
                 if (!result.cleared) throw new IllegalStateException("Cannot calibrate checked hand release actor=" + actor + " frame=" + frame);
-                calibratedOpening.put(Arrays.<Object>asList(candidate, previous, previousCandidate, handBase,
+                calibratedOpening.put(projectionKey("normal", candidate, previous, previousCandidate, handBase,
                         Double.valueOf(.5), Double.valueOf(previousClearance), Double.valueOf(clearance),
                         Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance)), result);
                 handOpeningPath.add(result.pose); handOpeningWeights.add(Double.valueOf(weight));
@@ -750,6 +750,10 @@ public final class SeatedScene {
                     + " solves=" + safetySolves + " memo_hits=" + safetyMemoHits
                     + " observed_torso_min=" + observedTorso + " observed_upper_arm_min=" + observedUpperArm + " observed_table_min=" + observedTable
                     + " observed_upper_arm_torso_min=" + observedUpperTorso + " observed_upper_arm_table_min=" + observedUpperTable);
+            if (turn.nominalDirectRestoreEndFrame() >= 0)
+                System.out.println("GMIT_HAND_SAFETY direct_settle_end actor=" + actor + " event=" + eventId
+                        + " nominal_end_frame=" + turn.nominalDirectRestoreEndFrame() + " actual_end_frame=" + turn.restoreEndFrame()
+                        + " extension_frames=" + turn.directSettleFrames());
             meaningTurn = null;
             projectionMemo.clear();
             System.out.println("GMIT_MEANING_GESTURE finished actor=" + actor + " event=" + eventId + " frame=" + frameNumber);
@@ -830,7 +834,9 @@ public final class SeatedScene {
                 } else for (String joint : ARM_JOINTS) {
                     assertMask(frame, typeClass, joint);
                     Double emitted = turn.emittedValueAt(joint, frameNumber);
-                    if (emitted == null) throw new IllegalStateException("Missing emitted Meaning arm frame actor=" + actor + " channel=" + joint + " frame=" + frameNumber);
+                    if (emitted == null) throw new IllegalStateException("Missing emitted Meaning arm frame actor=" + actor
+                            + " channel=" + joint + " frame=" + frameNumber + " timer=" + currentFrame()
+                            + " first_emitted=" + firstEmitted + " last_emitted=" + turn.lastEmittedFrame());
                     assertDegrees(frame, typeClass, joint, emitted.doubleValue());
                 }
             }
@@ -878,6 +884,7 @@ public final class SeatedScene {
             // depth before requiring an air gap. This is still a checked
             // moving pose, not the solver's exact-rest exemption.
             double motionPhase = "unclasp".equals(phase) || "reclasp".equals(phase) ? .5 : weight;
+            String projectionMode = "settling".equals(phase) ? "release-only" : "normal";
             Map.Entry<Integer, Map<String, Double>> prior = safePoses.lowerEntry(Integer.valueOf(frame));
             double clearance = handContact + (Math.max(handContact, handClearance) - handContact) * weight;
             double palmClearance = fingerPalmContact + (Math.max(fingerPalmContact, handClearance) - fingerPalmContact) * weight;
@@ -887,13 +894,16 @@ public final class SeatedScene {
             double previousPalmClearance = prior == null ? fingerPalmContact : requiredFingerPalmClearances.get(prior.getKey()).doubleValue();
             // A late raw batch changes the candidate or predecessor key. Exact
             // repeated future holds can reuse a result without repeating FK.
-            List<Object> key = Arrays.<Object>asList(Collections.unmodifiableMap(target), predecessor, previousCandidate, base,
+            List<Object> key = projectionKey(projectionMode, Collections.unmodifiableMap(target), predecessor, previousCandidate, base,
                     Double.valueOf(motionPhase), Double.valueOf(previousClearance), Double.valueOf(clearance),
                     Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance));
             HandCollision.Result result = projectionMemo.get(key);
             if (result == null) {
                 long started = System.nanoTime();
-                if ("reclasp".equals(phase)) {
+                if ("settling".equals(phase)) {
+                    result = handModel.settleAtBase(base, predecessor, previousCandidate, previousClearance, clearance,
+                            previousPalmClearance, palmClearance);
+                } else if ("reclasp".equals(phase)) {
                     // The semantic return must reach the verified separated
                     // endpoint exactly before reversing the release. A nearby
                     // collision-free pose can lie on a different finger path.
@@ -911,8 +921,41 @@ public final class SeatedScene {
                             previousPalmClearance, palmClearance);
                 }
                 safetyProjectionNanos += System.nanoTime() - started; safetySolves++;
-                projectionMemo.put(key, result);
             } else safetyMemoHits++;
+            if (!result.cleared && "restored".equals(phase) && turn.extendDirectSettling(frame)) {
+                // The nominal direct return reached its exact raw rest pose,
+                // but the preceding safe correction still needs a bounded
+                // one-degree release.  This tail cannot enter the normal
+                // six-degree projection search or invent a new escape pose.
+                phase = turn.phaseNameAt(frame);
+                if (!"settling".equals(phase)) throw new IllegalStateException("Direct settling state did not open");
+                weight = turn.clearanceWeightAt(frame);
+                motionPhase = 0;
+                projectionMode = "release-only";
+                key = projectionKey(projectionMode, Collections.unmodifiableMap(target), predecessor, previousCandidate, base,
+                        Double.valueOf(motionPhase), Double.valueOf(previousClearance), Double.valueOf(clearance),
+                        Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance));
+                HandCollision.Result settled = projectionMemo.get(key);
+                if (settled == null) {
+                    long started = System.nanoTime();
+                    settled = handModel.settleAtBase(base, predecessor, previousCandidate, previousClearance, clearance,
+                            previousPalmClearance, palmClearance);
+                    safetyProjectionNanos += System.nanoTime() - started; safetySolves++;
+                    projectionMemo.put(key, settled);
+                } else safetyMemoHits++;
+                result = settled;
+                System.out.println("GMIT_HAND_SAFETY direct_settle_begin actor=" + actor + " event=" + turn.eventId
+                        + " nominal_end_frame=" + turn.nominalDirectRestoreEndFrame() + " extension_frame=" + frame
+                        + " extension_count=" + turn.directSettleFrames() + " max_extension_frames="
+                        + MeaningGesture.MAX_DIRECT_SETTLE_FRAMES + " reason=terminal_release_bound");
+            }
+            if (!result.cleared && "restored".equals(phase)
+                    && turn.nominalDirectRestoreEndFrame() >= 0
+                    && turn.directSettleFrames() >= MeaningGesture.MAX_DIRECT_SETTLE_FRAMES)
+                System.out.println("GMIT_HAND_SAFETY direct_settle_exhausted actor=" + actor + " event=" + turn.eventId
+                        + " nominal_end_frame=" + turn.nominalDirectRestoreEndFrame() + " extension_frames="
+                        + turn.directSettleFrames() + " reason=terminal_release_bound");
+            projectionMemo.put(key, result);
             safetyTrace.put(Integer.valueOf(frame), frame + "," + turn.phaseNameAt(frame) + "," + weight + ","
                     + clearance + "," + result.before.minimum() + "," + result.after.minimum() + ","
                     + result.maxCorrectionDegrees + "," + result.cleared + "," + palmClearance + "," + result.before.fingerPalm + "," + result.after.fingerPalm
@@ -943,6 +986,14 @@ public final class SeatedScene {
             for (String joint : left.keySet())
                 if (Math.abs(left.get(joint).doubleValue() - right.get(joint).doubleValue()) > 1e-6) return false;
             return true;
+        }
+
+        private static List<Object> projectionKey(String mode, Map<String, Double> target,
+                Map<String, Double> predecessor, Map<String, Double> previousCandidate, Map<String, Double> base,
+                Double motionPhase, Double previousClearance, Double clearance,
+                Double previousPalmClearance, Double palmClearance) {
+            return Arrays.<Object>asList(mode, target, predecessor, previousCandidate, base, motionPhase,
+                    previousClearance, clearance, previousPalmClearance, palmClearance);
         }
 
         private void writeSafetyTrace(MeaningGesture.Turn turn) throws Exception {

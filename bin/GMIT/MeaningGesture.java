@@ -11,6 +11,12 @@ public final class MeaningGesture {
     static final int BLEND_FRAMES = 18;
     static final int RETURN_FRAMES = 60; // 2.4 seconds of decelerated arm and hand settling.
     static final int RETURN_DELAY_FRAMES = 4; // Briefly finish the gesture after the voice ends.
+    static final int MAX_DIRECT_SETTLE_FRAMES = 16; // Bounded 25 fps release-only tail after a direct return.
+    static final int MAX_CAPTURE_TAIL_FRAMES = 125;
+    // A capture at audioEnd+125 is inclusive; direct return starts on the next
+    // frame, then retains its hold, nominal return, and bounded tail.
+    static final long MAX_DIRECT_RESTORE_AFTER_AUDIO_MILLIS =
+            (long)(MAX_CAPTURE_TAIL_FRAMES + 1 + RETURN_DELAY_FRAMES + RETURN_FRAMES + MAX_DIRECT_SETTLE_FRAMES) * FRAME_MILLIS;
     static final int WORKSPACE_RETURN_FRAMES = 24;
     static final int WORKSPACE_RETURN_SEPARATED_FRAMES = 12;
     static final int UNCLASP_FRAMES = 3;
@@ -77,6 +83,10 @@ public final class MeaningGesture {
         private List<Map<String, Double>> handReturnPath;
         private List<Double> handReturnClearance;
         private boolean directReturn;
+        // Zero preserves the accepted nominal direct-return timeline. A
+        // nonzero count is opened only after the terminal collision check has
+        // proved that one-degree release needs another frame.
+        private int directSettleFrames;
         private int audioStartFrame = -1, audioEndFrame = -1, firstRawFrame = -1, lastRawFrame = -1;
         private boolean bound;
 
@@ -124,12 +134,19 @@ public final class MeaningGesture {
             }
             if (copy.isEmpty()) return;
             if (bound) validateFrame(frame);
+            int nominalBefore = bound && directReturn ? nominalDirectRestoreEndFrame() : -1;
             Map<String, Double> prior = raw.get(Integer.valueOf(frame));
             if (prior != null) { Map<String, Double> merged = new LinkedHashMap<String, Double>(prior); merged.putAll(copy); copy = merged; }
             if (prior == null && raw.size() >= MAX_RAW_FRAMES) throw new IllegalStateException("Meaning BAP capture exceeds frame bound");
             raw.put(Integer.valueOf(frame), Collections.unmodifiableMap(copy));
             if (firstRawFrame < 0 || frame < firstRawFrame) firstRawFrame = frame;
-            if (frame > lastRawFrame) lastRawFrame = frame;
+            if (frame > lastRawFrame) {
+                lastRawFrame = frame;
+                // A late real end frame moves the nominal direct return. Any
+                // tail budget belonged to the old endpoint and must not delay
+                // the newly extended semantic trajectory.
+                if (bound && directReturn && nominalDirectRestoreEndFrame() > nominalBefore) directSettleFrames = 0;
+            }
         }
 
         synchronized void bind(long startMillis, long endMillis) {
@@ -190,9 +207,19 @@ public final class MeaningGesture {
         synchronized int replayStartFrame(int currentFrame) { return firstRawFrame < 0 ? -1 : Math.max(firstRawFrame, currentFrame + 1); }
         synchronized int restoreEndFrame() {
             if (audioEndFrame < 0) return -1;
-            if (directReturn) return returnStartFrame() + RETURN_FRAMES;
+            if (directReturn) return nominalDirectRestoreEndFrame() + directSettleFrames;
             int end = Math.max(audioEndFrame, lastRawFrame);
             return end < 0 ? -1 : end + WORKSPACE_RETURN_FRAMES;
+        }
+        synchronized int nominalDirectRestoreEndFrame() {
+            return directReturn && audioEndFrame >= 0 ? returnStartFrame() + RETURN_FRAMES : -1;
+        }
+        synchronized int directSettleFrames() { return directSettleFrames; }
+        /** Opens one bounded release-only frame at the current direct endpoint. */
+        synchronized boolean extendDirectSettling(int frame) {
+            if (!directReturn || frame != restoreEndFrame() || directSettleFrames >= MAX_DIRECT_SETTLE_FRAMES) return false;
+            directSettleFrames++;
+            return true;
         }
         synchronized boolean activeAt(int frame) { return bound && firstRawFrame >= 0 && frame >= firstRawFrame && frame <= restoreEndFrame(); }
         synchronized boolean restoredAt(int frame) { return bound && restoreEndFrame() >= 0 && frame > restoreEndFrame(); }
@@ -263,8 +290,11 @@ public final class MeaningGesture {
             }
             int returnStart = returnStartFrame();
             if (frame < returnStart) return semantic;
-            if (directReturn) return interpolate(semantic, seatedBase,
-                    settleEase((frame - returnStart) / (double) RETURN_FRAMES));
+            if (directReturn) {
+                if (frame >= nominalDirectRestoreEndFrame()) return seatedBase;
+                return interpolate(semantic, seatedBase,
+                        settleEase((frame - returnStart) / (double) RETURN_FRAMES));
+            }
             int reclaspStart = reclaspStartFrame();
             if (frame < reclaspStart) {
                 double separated = returnJoinValue(joint, seatedBase);
@@ -296,7 +326,7 @@ public final class MeaningGesture {
                     return smooth((releaseOffset - UNCLASP_FRAMES) / (double) (WORKSPACE_FRAMES - UNCLASP_FRAMES));
                 return 1.0;
             }
-            if (directReturn) return 1.0; // Keep the full air gap throughout the direct return.
+            if (directReturn) return frame < nominalDirectRestoreEndFrame() ? 1.0 : 0.0;
             int reclaspStart = reclaspStartFrame();
             if (frame < reclaspStart) return handReturnClearance == null ? 1.0
                     : handReturnClearance.get(handReturnClearance.size() - 1).doubleValue();
@@ -312,7 +342,10 @@ public final class MeaningGesture {
             if (!activeAt(frame)) return frame > restoreEndFrame() ? "restored" : "static";
             if (frame < semanticStartFrame()) return "unclasp";
             if (frame < returnStartFrame()) return "semantic";
-            if (directReturn) return frame < restoreEndFrame() ? "return" : "restored";
+            if (directReturn) {
+                if (frame < nominalDirectRestoreEndFrame()) return "return";
+                return frame < restoreEndFrame() ? "settling" : "restored";
+            }
             if (frame < reclaspStartFrame()) return "return-separated";
             if (frame < restoreEndFrame()) return "reclasp";
             return "restored";
@@ -392,6 +425,12 @@ public final class MeaningGesture {
         }
 
         synchronized int firstEmittedFrame() { return emitted.isEmpty() ? -1 : emitted.keySet().iterator().next().intValue(); }
+        synchronized int lastEmittedFrame() {
+            if (emitted.isEmpty()) return -1;
+            int last = -1;
+            for (Integer frame : emitted.keySet()) last = frame.intValue();
+            return last;
+        }
 
         synchronized Double emittedValueAt(String joint, int frame) {
             Map<String, Double> values = emitted.get(Integer.valueOf(frame));
@@ -428,7 +467,7 @@ public final class MeaningGesture {
         }
 
         private void validateFrame(int frame) {
-            if (frame < audioStartFrame - 50 || frame > audioEndFrame + 125)
+            if (frame < audioStartFrame - 50 || frame > audioEndFrame + MAX_CAPTURE_TAIL_FRAMES)
                 throw new IllegalArgumentException("Meaning BAP frame lies outside bounded audio tail: " + frame);
         }
 

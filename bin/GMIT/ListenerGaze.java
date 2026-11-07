@@ -21,7 +21,7 @@ public final class ListenerGaze {
     private static final int MIDPOINT_TRANSITION_FRAMES = 28;
     private static final int TRANSITION_FRAMES = 18;
     private static final int HANDOFF_TRANSITION_FRAMES = 18;
-    private static final int NOD_DURATION_FRAMES = 12;
+    private static final int NOD_DURATION_FRAMES = 28; // 1.12 seconds, with a gentle start and finish.
     private static final int NOD_SETTLE_FRAMES = 2;
     private static final double NOD_PITCH_RADIANS = Math.toRadians(4);
     private static volatile Throwable failure;
@@ -95,7 +95,9 @@ public final class ListenerGaze {
         if (audioEndMillis <= audioStartMillis || audioEndMillis - audioStartMillis > 15000)
             throw new IllegalArgumentException("Gaze requires a bounded audio interval of at most 15 seconds");
         int now = ((Number)currentFrame.invoke(null)).intValue();
-        TimingPlan plan = planTiming(activeSpeaker, speakerPeer, nextSpeaker, audioStartMillis, audioEndMillis, seed, now);
+        Map<String, Integer> nodCounts = new java.util.HashMap<>();
+        for (Actor actor : actors.values()) nodCounts.put(actor.id, Integer.valueOf(actor.nodCount()));
+        TimingPlan plan = planTiming(activeSpeaker, speakerPeer, nextSpeaker, audioStartMillis, audioEndMillis, seed, now, nodCounts);
         for (TimingEvent event : plan.events()) schedule(plan, event);
         speaker = activeSpeaker;
         System.out.println("GMIT_GAZE scheduled speaker=" + activeSpeaker + " peer=" + speakerPeer
@@ -108,6 +110,17 @@ public final class ListenerGaze {
 
     static TimingPlan planTiming(String activeSpeaker, String speakerPeer, String nextSpeaker,
                                  long audioStartMillis, long audioEndMillis, long seed, int now) {
+        return planTiming(activeSpeaker, speakerPeer, nextSpeaker, audioStartMillis, audioEndMillis,
+                seed, now, Collections.<String, Integer>emptyMap());
+    }
+
+    /** A snapshot of scheduled nod counts keeps planning deterministic and session-local. */
+    static TimingPlan planTiming(String activeSpeaker, String speakerPeer, String nextSpeaker,
+                                 long audioStartMillis, long audioEndMillis, long seed, int now,
+                                 Map<String, Integer> nodCounts) {
+        if (nodCounts == null) throw new IllegalArgumentException("Nod counts are required");
+        for (String id : ACTORS) if (nodCount(nodCounts, id) < 0)
+            throw new IllegalArgumentException("Negative nod count for " + id);
         validateActorId(activeSpeaker, "speaker"); validateActorId(speakerPeer, "speaker peer");
         if (activeSpeaker.equals(speakerPeer)) throw new IllegalArgumentException("Speaker cannot gaze at self: " + activeSpeaker);
         if (nextSpeaker != null) { validateActorId(nextSpeaker, "next speaker"); if (nextSpeaker.equals(activeSpeaker)) nextSpeaker = null; }
@@ -147,18 +160,30 @@ public final class ListenerGaze {
         if (handoff >= 0 && nextSpeaker != null && !nextSpeaker.equals(midpointPeer))
             events.add(TimingEvent.gaze("speaker-handoff", activeSpeaker, nextSpeaker, handoff, HANDOFF_TRANSITION_FRAMES));
         else if (nextSpeaker != null && nextSpeaker.equals(midpointPeer)) handoff = -1;
-        if (BACKCHANNEL && listenerFrame >= 0) addOneNod(events, activeSpeaker, listenerFrame, handoff < 0 ? endFrame : handoff, seed);
+        if (BACKCHANNEL && listenerFrame >= 0) addOneNod(events, activeSpeaker, listenerFrame,
+                handoff < 0 ? endFrame : handoff, seed, nodCounts);
         return new TimingPlan(speakerFrame, listenerFrame, endFrame, handoff, events);
     }
 
-    private static void addOneNod(List<TimingEvent> events, String speakerId, int listenerFrame, int latestFrame, long seed) {
+    private static int nodCount(Map<String, Integer> counts, String actor) {
+        Integer count = counts.get(actor);
+        return count == null ? 0 : count.intValue();
+    }
+
+    private static void addOneNod(List<TimingEvent> events, String speakerId, int listenerFrame,
+                                  int latestFrame, long seed, Map<String, Integer> nodCounts) {
         // Callers commonly derive adjacent per-event seeds. Random's first draw
         // does not decorrelate those well enough for a visible 50% gate, so mix
         // the full 64-bit value before using it for every backchannel decision.
         Random random = new Random(mixSeed(seed));
         if (!random.nextBoolean()) return; // Deliberately occasional, never a required behavior.
         List<String> listeners = new ArrayList<>();
-        for (String id : ACTORS) if (!id.equals(speakerId)) listeners.add(id);
+        int fewestNods = Integer.MAX_VALUE;
+        for (String id : ACTORS) if (!id.equals(speakerId)) {
+            int count = nodCount(nodCounts, id);
+            if (count < fewestNods) { listeners.clear(); fewestNods = count; }
+            if (count == fewestNods) listeners.add(id);
+        }
         String listener = listeners.get(random.nextInt(listeners.size()));
         int earliest = listenerFrame + TRANSITION_FRAMES + NOD_SETTLE_FRAMES;
         int lastStart = latestFrame - NOD_SETTLE_FRAMES - NOD_DURATION_FRAMES;
@@ -393,6 +418,7 @@ public final class ListenerGaze {
             if (durationFrames <= 0 || !Double.isFinite(pitch)) throw new IllegalArgumentException("Invalid nod timing or pitch");
             nods.add(new Nod(start, durationFrames, pitch));
         }
+        synchronized int nodCount() { return nods.size(); }
         synchronized double[] bodyAngles(int frame) {
             double[] result = at(frame);
             for (Nod nod : nods) result[1] += nod.at(frame);
@@ -416,7 +442,7 @@ public final class ListenerGaze {
             Nod(int start, int durationFrames, double pitch) { this.start = start; this.durationFrames = durationFrames; this.pitch = pitch; }
             double at(int frame) {
                 double t = (frame - start) / (double)durationFrames;
-                return t <= 0 || t >= 1 ? 0 : pitch * Math.sin(Math.PI * t);
+                return t <= 0 || t >= 1 ? 0 : pitch * .5 * (1.0 - Math.cos(2.0 * Math.PI * t));
             }
         }
         Object face(Object source) throws Exception {

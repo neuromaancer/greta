@@ -134,9 +134,14 @@ private runtime data or credentials. For instruction/documentation maintenance
 or Git publication alone, check syntax, links, and actual diffs; do not rerun
 GUI, speech, or models solely for those changes.
 
-The explicitly authorized MODIFF-VQ extension is an opt-in, facilitator-only
-engineering experiment, documented in `docs/gmit/MODIFF_VQ.md`. Ordinary replay
-keeps it disabled. Use the existing local checkpoint bundle with strict CPU
+The MODIFF-VQ extension was retired from the active GMIT workflow at the user's
+request on 2026-11-07. Do not start its worker or include the MODIFF wrapper in
+replay, preview, or acceptance commands. Use `bin/GMIT/Start-GMIT.ps1` directly;
+these native Windows replays require neither WSL nor a Python model worker.
+Preserve the historical implementation and local checkpoints. Its earlier
+facilitator-only engineering experiment is documented in `docs/gmit/MODIFF_VQ.md`.
+Only a new explicit request can reauthorize its execution. Historical safeguards
+remain applicable in that event: use the existing local checkpoint bundle with strict CPU
 loading; do not start the legacy camera/microphone/VAP launchers. Its gaze-selected
 virtual patient AU history is an unvalidated proxy for human OpenFace input.
 Keep per-patient histories separate, reject stale target responses, and limit
@@ -190,7 +195,14 @@ finger release/workspace entry. The current separated rests use
 normal cross-hand and finger-palm air gaps at rest; keep full air gaps and the
 normal per-frame projection during return. Its final zero-weight restored frame
 must reach the exact base within correction rate limits and sampled-path checks,
-or fail closed. Preserve the preceding safe corrective offset and release it by
+or fail closed. If the nominal endpoint still has a bounded corrective offset,
+allow at most 16 additional frames (640 ms) of release-only settling with the
+raw target fixed at the exact rest. While a residual remains, every tail frame
+must make safe progress;
+it cannot enter the normal escape search, increase a correction, or relax a
+collision threshold. Cache normal and release-only results separately and route
+reprojected settling frames through the same release-only solver. The next
+speaker waits for the actual exact-rest endpoint. Preserve the preceding safe corrective offset and release it by
 at most one degree per joint per frame; if full release is unsafe, choose a
 checked subset of the nonzero correction axes that makes progress toward zero.
 Refine new coarse corrections toward
@@ -230,6 +242,14 @@ The user accepted its final seven-turn replay on the same date, reporting no
 obvious intersections and distinct actor styles; see `docs/gmit/MEANING_MINER.md`.
 Keep its numeric, runtime, and human acceptance evidence distinct, and report
 measured callback delays rather than claiming a 25 fps guarantee.
+
+Meaning arm scheduling keeps a bounded 25-frame future window and refreshes it
+before each diagnostic screenshot. Preserve strict same-frame, all-channel
+verification after the first arm submission; do not replace missing emissions
+with a held-frame fallback. Initial static pending is distinct and remains
+bounded by the existing three-frame opening guard. Record screenshot cost and
+queue delay separately; neither lookahead nor successful sampling proves a
+continuous frame-rate guarantee.
 
 ## Agent responsibilities
 
@@ -334,7 +354,11 @@ timeline for prequeued speech frames and cover the bounded audio interval with
 neck/eye-only masks so older queued frames cannot restore the previous gaze.
 Gaze owns the cervical channels while enabled and composes a small listener nod
 into pitch. Seeded backchannels have a 50% per-turn chance, at most one listener
-nod per turn, after the initial gaze settles and before handoff/end. The two
+nod per turn, after the initial gaze settles and before handoff/end. A nod lasts
+28 frames (1.12 seconds) with smooth onset and return. Among eligible listeners,
+prefer the smallest session-local count of scheduled nods and break ties using
+the seeded random generator. The facilitator participates whenever listening;
+do not force a nod or extend it beyond the available turn interval. The two
 listeners may turn toward the speaker simultaneously; only nods are exclusive.
 Use `-DisableListenerNods`, `-DisableListenerGaze`, or `-DisableTabletopArms` for
 isolation. The NetBeans child forwards `gmit.gaze.enabled`, `gmit.gaze.head`,

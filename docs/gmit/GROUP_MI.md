@@ -184,6 +184,11 @@ speaker takes priority at utterance end. The final head transition is scheduled
 inside the audio interval so it finishes as speech ends. Listener turns remain
 scheduled from the actual Audio start plus 200 ms. A deterministic seed controls
 an optional single listener nod per turn (50% probability, 4-degree pitch).
+Each nod lasts 1.12 seconds with a smooth onset and return. When a nod is
+triggered, the eligible listener with fewer scheduled nods in this session has
+priority; ties are resolved by the seeded random generator. The facilitator is
+eligible whenever a patient is speaking. The two listeners can turn toward the
+speaker together, but only one can nod in a turn.
 Only cervical yaw/pitch and four eyeball FAP channels are controlled. LipBlender
 output is cloned before those eye channels change; mouth and eyelid masks remain
 intact. Finite gaze-only frames also move idle listeners without requiring speech.

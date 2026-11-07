@@ -170,6 +170,28 @@ public final class HandCollisionTest {
                 clearance, clearance, clearance, clearance);
         require(!unfinishedReturn.cleared,
                 "exact-rest endpoint fails closed if a previous correction cannot decay within the frame rate bound");
+        HandCollision.Result directSettle = model.settleAtBase(base, lingeringCorrection, base,
+                clearance, clearance, clearance, clearance);
+        require(directSettle.cleared && correctionMagnitude(directSettle.pose, base) <= .500001,
+                "direct settling releases an unresolved terminal correction by at most one degree without a new search");
+        HandCollision.Result settledTerminal = model.correct(base, base, 0, directSettle.pose, base,
+                clearance, clearance, clearance, clearance);
+        require(settledTerminal.cleared && settledTerminal.pose.equals(base),
+                "one bounded direct-settling frame permits the subsequent exact rest endpoint");
+        Map<String, Double> twoTailCorrection = new LinkedHashMap<String, Double>(base);
+        twoTailCorrection.put("l_shoulder_flexion", Double.valueOf(2.5));
+        HandCollision.Result firstTail = model.settleAtBase(base, twoTailCorrection, base,
+                clearance, clearance, clearance, clearance);
+        require(firstTail.cleared && Math.abs(firstTail.pose.get("l_shoulder_flexion").doubleValue() - 1.5) < 1e-9,
+                "a higher residual releases exactly one degree during the first direct-settling frame");
+        HandCollision.Result secondTail = model.settleAtBase(base, firstTail.pose, base,
+                clearance, clearance, clearance, clearance);
+        require(secondTail.cleared && Math.abs(secondTail.pose.get("l_shoulder_flexion").doubleValue() - .5) < 1e-9,
+                "each required direct-settling frame retains the one-degree release cap");
+        HandCollision.Result twoTailTerminal = model.correct(base, base, 0, secondTail.pose, base,
+                clearance, clearance, clearance, clearance);
+        require(twoTailTerminal.cleared && twoTailTerminal.pose.equals(base),
+                "the exact endpoint follows only after every bounded settling release is complete");
         require(roundTrip(model).measure(base).minimum() == model.measure(base).minimum(), "numeric snapshot serializes without native handles");
         HandCollision.PathMargin margin = model.pathMargin(first.pose, bounded.pose, clearance, clearance);
         require(margin.safe(), "reported intermediate path margin is safe");

@@ -290,6 +290,37 @@ public final class MeaningGestureTest {
         require(direct.clearanceWeightAt(direct.restoreEndFrame()) == 0
                         && "restored".equals(direct.phaseNameAt(direct.restoreEndFrame())),
                 "direct endpoint uses the geometry solver's checked exact-rest branch");
+        int nominalDirectEnd = direct.restoreEndFrame();
+        require(direct.extendDirectSettling(nominalDirectEnd)
+                        && direct.restoreEndFrame() == nominalDirectEnd + 1
+                        && direct.directSettleFrames() == 1,
+                "only an unresolved direct endpoint can open one bounded settling frame");
+        require("settling".equals(direct.phaseNameAt(nominalDirectEnd))
+                        && direct.clearanceWeightAt(nominalDirectEnd) == 0
+                        && direct.valueAt("l_wrist_flexion", nominalDirectEnd, 12) == 12,
+                "the settling tail holds the exact raw rest pose while collision correction releases");
+        require(!direct.extendDirectSettling(nominalDirectEnd),
+                "direct settling cannot open twice at the same completed tail frame");
+        while (direct.directSettleFrames() < MeaningGesture.MAX_DIRECT_SETTLE_FRAMES)
+            require(direct.extendDirectSettling(direct.restoreEndFrame()),
+                    "each bounded direct-settling extension starts only at the current endpoint");
+        require(direct.restoreEndFrame() == nominalDirectEnd + MeaningGesture.MAX_DIRECT_SETTLE_FRAMES
+                        && !direct.extendDirectSettling(direct.restoreEndFrame()),
+                "direct settling is capped at sixteen 25 fps frames before fail-closed handling");
+        MeaningGesture.Turn lateDirect = new MeaningGesture.Turn("patient-a", "a-late-direct", .24);
+        lateDirect.setDirectReturn(true); lateDirect.capture(100, wrist); lateDirect.bind(4000, 5600);
+        int oldNominalEnd = lateDirect.restoreEndFrame();
+        require(lateDirect.extendDirectSettling(oldNominalEnd), "late-capture fixture opens an old endpoint tail");
+        lateDirect.capture(180, wrist);
+        int movedNominalEnd = lateDirect.restoreEndFrame();
+        require(movedNominalEnd > oldNominalEnd && lateDirect.directSettleFrames() == 0,
+                "a new maximum raw frame resets only the obsolete direct-settling tail");
+        require(lateDirect.extendDirectSettling(movedNominalEnd), "moved endpoint can independently open a tail");
+        lateDirect.capture(180, wrist); lateDirect.capture(160, wrist);
+        require(lateDirect.restoreEndFrame() == movedNominalEnd + 1 && lateDirect.directSettleFrames() == 1,
+                "duplicate and non-endpoint raw captures preserve the active tail");
+        require(MeaningGesture.MAX_DIRECT_RESTORE_AFTER_AUDIO_MILLIS == 8240,
+                "shared playback wait bound covers capture tail, hold, return, and settling tail");
         boolean returnModeLocked = false;
         try { direct.setDirectReturn(false); } catch (IllegalStateException expected) { returnModeLocked = true; }
         require(returnModeLocked, "return mode cannot change after audio binding");

@@ -93,7 +93,12 @@ hands with the full normal cross-hand and finger-palm air gaps. Every return
 frame still passes the ordinary projection and sampled-path checks; at the end,
 the solver must reach the exact rest within its rate limits or fail explicitly.
 Only the nominal interpolation is monotone; safety projection may adjust it.
-The next speaker waits for completion.
+If a correction remains at the nominal endpoint, up to 16 extra frames (640 ms)
+can release it while keeping the raw target at the exact rest. This bounded
+settling phase only reduces existing corrective offsets, by at most one degree
+per joint per frame, with unchanged geometric and swept-path checks. It cannot
+invoke the normal escape search or bypass a failed check; no progress or budget
+exhaustion stops the run explicitly. The next speaker waits for actual completion.
 
 The backward-compatible `workspace` mode remains the default for other room
 configurations. It retains the original 24-frame return, including 12 frames
@@ -169,8 +174,9 @@ the exact-rest frame rejects residual correction above the smaller one-degree
 release limit. This prevents an endpoint reset from concealing a return jump.
 These bounds address corrective motion, not arbitrary stock gesture acceleration.
 
-The seated root, legs, gaze/head, lips, blinking, and optional MODIFF eyebrows
-keep their existing owners. Standing-body channels are filtered from the stock
+The seated root, legs, gaze/head, lips, and blinking keep their existing owners.
+The historical MODIFF eyebrow adapter remains disabled in the active workflow.
+Standing-body channels are filtered from the stock
 gesture output; this integration does not authorize stock torso or head behavior
 to overwrite the seated pose or the verified gaze schedule. This is the complete
 English semantic-to-gesture route with a seated arm adaptation, not unrestricted
@@ -206,15 +212,10 @@ timing. Omit `-MeaningMiner` for ordinary playback. Keep tabletop arms enabled.
 Hand clearance is enabled with MeaningMiner. `-DisableHandSafety` isolates the
 geometry correction for diagnosis; it keeps the staged release/return envelope.
 
-To combine it with MODIFF, run from the **development checkout**:
-
-```powershell
-Set-Location 'C:\Users\alafate abulimiti\research\workspace\greta'
-& '.\integrations\gmit\Start-GMIT-Modiff.ps1' -MeaningMiner `
-  -Replay 'C:\absolute\path\to\replay.xml'
-```
-
-MODIFF remains facilitator-only; MeaningMiner applies to all three speakers.
+MODIFF was retired from the current workflow on 2026-11-07. Use the native
+Windows launcher above without `-ModiffDirectory` or the MODIFF wrapper;
+MeaningMiner applies to all three speakers and needs no WSL/Python worker.
+Earlier MODIFF validation below remains historical evidence.
 
 In NetBeans, use `GMIT Group MI` or `GMIT Replay Import` and add
 `-Dgmit.meaningminer.enabled=true` to VM options. For silent animation checks,
@@ -229,9 +230,9 @@ The complete runtime supplies MeaningMiner.jar, WordNet 3.0, the English Stanfor
 parser, OpenNLP chunker, image-schema dictionaries, and character gesture
 lexicons. Local receipts identify actual module code sources and resource hashes.
 The English Java path needs no Python NLP server, broker, LLM, camera, or
-microphone. MODIFF remains a separate opt-in CPU worker.
+microphone. The historical MODIFF CPU worker is excluded from current runs.
 
-The deployment allowlist remains sixteen files. The current eight changed
+The deployment allowlist remains sixteen files. The earlier conversational revision's eight changed
 mappings copy these source files to the same relative paths under `greta_2.1`:
 `bin/GMIT/MeaningMinerBridge.java`, `bin/GMIT/MeaningGesture.java`,
 `bin/GMIT/SmokeProbe.java`, `bin/GMIT/SeatedScene.java`,
@@ -254,7 +255,92 @@ Keep transcripts, logs, captures, compiled classes, and receipts local.
 
 ## Verification record
 
-### Current source behavior, 2026-11-07
+### Replay repair and right-palm calibration, 2026-11-07
+
+The user's independent replay stopped during patient A's final restored frame.
+Its body, table, and cross-hand endpoints were safe, but a residual 1.275-degree
+shoulder correction exceeded the one-degree release bound. The bounded
+release-only settling described above preserves that bound instead of snapping
+to rest. Reconstructing this exact failed trajectory now reaches the exact base
+one frame (40 ms) later, with no failed endpoint or sampled-path checks. Seven
+previously accepted trajectories still pass all 1,401 frames without extensions.
+Late raw frames that move the nominal return endpoint reset only the obsolete
+tail budget; duplicate and non-maximum captures do not. Capture, return, and
+waiting share an 8,240 ms maximum after audio, plus explicit observation and
+watchdog margins.
+
+Patient B's anatomical right hand was recalibrated as a whole: wrist orientation,
+resting finger shape, and small proximal adjustments. Its four-landmark palm
+plane tilt falls from 21.75 to 2.92 degrees; the palm mesh is not intrinsically
+planar. Wrist horizontal placement is retained, with a 0.69 mm vertical change.
+The four fingertip proxy margins are about 1.5 mm and the thumb margins are
+1.0 to 1.53 mm. Left-hand, other-actor, root, and furniture settings are unchanged.
+Compensating proximal offsets preserve the absolute semantic workspace.
+Both recorded patient-B trajectories pass 412 frames, including opening and
+return, with exact rest and no settling extension. All 74 arm channels are
+present; projection preserves the 68 non-correction channels. Captured semantic
+wrist/finger targets after entry remain unchanged. These proxy margins are not
+mesh-contact proof. The user accepted the native static preview as naturally
+flat on the table; full-motion acceptance is recorded separately.
+
+Listener nods now last 28 frames (1.12 seconds) with smooth onset and return.
+The seeded 50% trigger is unchanged. Among listening actors, those with fewer
+scheduled nods have priority, with seeded random tie-breaking. The facilitator
+was already eligible; this change reduces repeated selection of the same peer.
+Only one listener can nod per turn. MODIFF is excluded from these checks and
+from the current startup workflow.
+
+The first source-only muted run stopped after a missing emitted arm-frame
+assertion during high-resolution screenshot sampling. Repeated screenshot work
+could exhaust the previous 480 ms scheduling window; no clock divergence was
+established. The probe now refreshes the arm queue before each capture and uses
+a bounded 25-frame (one-second) lookahead. Same-frame checks of every arm channel
+remain strict after the first submission. The pre-existing initial static
+pending interval remains bounded by the three-frame opening guard.
+Screenshot durations and queue batch durations are separate diagnostics.
+
+Windows JDK 8 compilation and focused gesture, collision, bridge, and gaze
+tests passed. The subsequent standard-resolution muted run
+`muted-20261107-162227-882` completed all seven turns with 1,402 projected frames,
+541 observed samples, seven exact restorations, and one 28-frame nod per actor.
+Patient A's fifth turn exercised a one-frame settling extension; the other six
+turns needed none. The largest queue batch was 81 ms. Fifty diagnostic captures
+had a 656 ms maximum including scene initialization; this does not establish
+the maximum capture cost during active gestures or guarantee 25 fps.
+
+The deployed audible run `replay-20261107-162510-256` then exited successfully
+after seven single-actor audio schedules in F/A/B/F/A/B/F order. All 1,350
+projected frames passed, with 523 observed samples, seven exact restorations,
+31 gaze-phase checks, and one 28-frame nod per actor. This run needed no settling
+extension. Its largest queue batch was 66 ms; fifty captures had a 518 ms maximum
+including initialization. The user confirmed that the right hand and return,
+longer nods including the facilitator, full replay, speech, lips, and gaze were
+all normal. The seven legacy scratch files were restored. MODIFF workers and
+dialogue models were not started; legacy module-discovery messages are not
+evidence of an active MODIFF instance. Known WordNet and disconnected external
+sender diagnostics remain; successful completion does not mean an empty error
+log or universal mesh collision prevention.
+Independent integration review found no publication blocker in the final diff,
+deployment receipt, privacy boundaries, or evidence. The runtime's 67 pre-existing
+Git status entries were unchanged after verification.
+
+This repair deploys seven changed paths to the same relative locations under
+`greta_2.1`: `bin/GMIT/SmokeProbe.java`, `SeatedScene.java`, `ListenerGaze.java`,
+`MeaningGesture.java`, `HandCollision.java`, `Start-GMIT.ps1`, and
+`bin/Environments/GMIT/group-mi-room.xml`. All sixteen allowlisted hashes were
+verified. The NetBeans launcher's outer timeout update is source-only;
+NetBeans execution has not been reaccepted for this repair. No runtime JAR,
+voice, character resource, checkpoint, or private GMIT source is replaced.
+The deployment receipt retains originals at runtime
+`bin/GMIT/local/deploy-20261107T152454312044Z/receipt.json`.
+To restore the immediately preceding runtime version from the development
+checkout in WSL:
+
+```sh
+python3 integrations/gmit/deploy.py --runtime '/mnt/c/Users/alafate abulimiti/research/workspace/greta_2.1' --rollback '/mnt/c/Users/alafate abulimiti/research/workspace/greta_2.1/bin/GMIT/local/deploy-20261107T152454312044Z/receipt.json'
+```
+
+### Earlier conversational behavior, 2026-11-07
 
 Windows JDK 8 compilation and focused bridge, gesture, geometry, and gaze tests
 passed. They cover main-schema admission, bounded continuous return, exact-rest

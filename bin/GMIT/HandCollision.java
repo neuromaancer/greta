@@ -510,6 +510,45 @@ public final class HandCollision {
             return new Result(projected, before, after, cleared, maxCorrection(projected, candidate));
         }
 
+        /**
+         * Advances an accepted direct-return correction while the raw target is
+         * already the exact rest pose. This deliberately never searches for a
+         * new escape correction: each active axis can only release by at most
+         * one degree, under the usual endpoint and swept-path guards.
+         */
+        public Result settleAtBase(Map<String, Double> base, Map<String, Double> previousProjected,
+                Map<String, Double> previousCandidate, double previousClearance, double clearance,
+                double previousFingerPalmClearance, double fingerPalmClearance) {
+            if (base == null || previousProjected == null || previousCandidate == null)
+                throw new IllegalArgumentException("Direct settling needs base and prior projected/raw poses");
+            if (!finite(previousClearance) || !finite(clearance) || !finite(previousFingerPalmClearance) || !finite(fingerPalmClearance))
+                throw new IllegalArgumentException("Invalid direct-settling clearance");
+            Metrics before = measure(base);
+            Map<String, Double> retained = retainedCorrection(base, previousProjected, previousCandidate);
+            Metrics retainedMetrics = measure(retained);
+            if (retainedMetrics.minimum() < clearance || retainedMetrics.fingerPalm < fingerPalmClearance
+                    || retainedMetrics.boundaryMinimum() < 0
+                    || !safePath(previousProjected, retained, previousClearance, clearance,
+                            previousFingerPalmClearance, fingerPalmClearance))
+                return new Result(retained, before, retainedMetrics, false, maxCorrection(retained, base));
+            Map<String, Double> relaxed = relaxedCorrection(base, previousProjected, previousCandidate);
+            Metrics relaxedMetrics = measure(relaxed);
+            if (relaxedMetrics.minimum() >= clearance && relaxedMetrics.fingerPalm >= fingerPalmClearance
+                    && relaxedMetrics.boundaryMinimum() >= 0
+                    && safePath(previousProjected, relaxed, previousClearance, clearance,
+                            previousFingerPalmClearance, fingerPalmClearance))
+                return new Result(relaxed, before, relaxedMetrics, true, maxCorrection(relaxed, base));
+            Map<String, Double> selective = selectiveRelaxation(base, retained, previousProjected, previousCandidate,
+                    previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+            if (selective != null) {
+                Metrics selectiveMetrics = measure(selective);
+                return new Result(selective, before, selectiveMetrics, true, maxCorrection(selective, base));
+            }
+            // Retaining without verified progress would only conceal a stuck
+            // correction until the bounded tail expires.
+            return new Result(retained, before, retainedMetrics, false, maxCorrection(retained, base));
+        }
+
         private List<Map<String, Double>> seedCandidates(Map<String, Double> candidate, String[] joints, double[][] levels) {
             List<Map<String, Double>> results = new ArrayList<Map<String, Double>>();
             results.add(correctionSeed(candidate, joints, new double[joints.length]));

@@ -1,5 +1,11 @@
 # Facilitator gaze-conditioned MODIFF-VQ experiment
 
+**Historical experiment, retired from the active GMIT workflow on 2026-11-07.**
+The user requested that subsequent runs omit MODIFF. Use the complete runtime's
+`bin/GMIT/Start-GMIT.ps1` for current replay; it requires no WSL model worker.
+The implementation, checkpoints, and earlier commands below remain as a
+reproducibility record, not the current startup recommendation.
+
 This opt-in engineering configuration uses the local Greta 2.1 VQ-VAE/E3
 checkpoints to generate facilitator eyebrow motion from the facial AU history
 of the patient selected by the existing gaze schedule. It does not generate

@@ -77,8 +77,9 @@ if ($Replay) {
 # Smoke remains capped at 278 seconds; a 16-turn scenario is capped at 662.
 $runTimeoutSeconds = 120 + $StartDelaySeconds + $EndHoldSeconds + $turnCount * (10 + 15 + $TurnGapSeconds + 2)
 # Three bounded extractor initializations, one bounded analysis per turn,
-# and the maximum seated gesture return tail in addition to ordinary playback.
-if ($MeaningMiner) { $runTimeoutSeconds += 90 + $turnCount * (30 + 6) }
+# and a conservative 9-second seated gesture return budget per turn. This
+# covers the 8.240-second bounded restore plus observation margin.
+if ($MeaningMiner) { $runTimeoutSeconds += 90 + $turnCount * (30 + 9) }
 $runPrefix = if ($GroupMI) { 'group-mi-' } elseif ($Replay) { 'replay-' } else { 'run-' }
 $run = Join-Path $PSScriptRoot ('local\' + $runPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $run | Out-Null
