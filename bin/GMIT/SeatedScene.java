@@ -120,6 +120,11 @@ public final class SeatedScene {
         controller(actor).beginMeaningTurn(eventId);
     }
 
+    /** Room-owned density policy; standalone semantic extraction retains all intentions. */
+    public static synchronized String meaningGestureAdmission(String actor) {
+        return installed ? controller(actor).pose.admission : "all";
+    }
+
     /** Change only expressivity; preserve the selected gesture and word markers. */
     public static synchronized void applyMeaningStyle(String actor, Object gesture) throws Exception {
         if (!MEANING_GESTURES || !ARMS || !installed) return;
@@ -217,7 +222,10 @@ public final class SeatedScene {
                     number(seat, "l_wrist_pivot_degrees", 0), number(seat, "r_wrist_pivot_degrees", 0),
                     number(seat, "l_wrist_twisting_degrees", 0), number(seat, "r_wrist_twisting_degrees", 0), readArmOverrides(seat), readGestureOffsets(seat),
                     MeaningGesture.Style.named(seat.hasAttribute("gesture_style") ? seat.getAttribute("gesture_style") : "legacy"),
-                    number(seat, "gesture_release_lead", 0)));
+                    number(seat, "gesture_release_lead", 0),
+                    seat.hasAttribute("gesture_admission") ? seat.getAttribute("gesture_admission") : "all",
+                    seat.hasAttribute("gesture_return") ? seat.getAttribute("gesture_return") : "workspace",
+                    seat.hasAttribute("tabletop_contact") ? seat.getAttribute("tabletop_contact") : "false"));
         }
         for (String actor : ACTORS) if (!poses.containsKey(actor)) throw new IllegalArgumentException("Room seat is missing actor: " + actor);
         return new RoomLayout(root, poses, number(root, "camera_x", 0), number(root, "camera_y", 1.5),
@@ -421,7 +429,10 @@ public final class SeatedScene {
         private final Map<String, Double> armOverrides, gestureOffsets;
         private final MeaningGesture.Style style;
         private final double releaseLead;
-        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting, Map<String, Double> armOverrides, Map<String, Double> gestureOffsets, MeaningGesture.Style style, double releaseLead) {
+        private final String admission;
+        private final boolean directReturn;
+        private final boolean tabletopContact;
+        PoseSpec(double x, double z, double yaw, double vertical, double hip, double knee, double ankle, double sacroiliac, double lShoulderFlexion, double rShoulderFlexion, double lShoulderAbduct, double rShoulderAbduct, double lElbowFlexion, double rElbowFlexion, double lElbowTwisting, double rElbowTwisting, double lWristFlexion, double rWristFlexion, double lWristPivot, double rWristPivot, double lWristTwisting, double rWristTwisting, Map<String, Double> armOverrides, Map<String, Double> gestureOffsets, MeaningGesture.Style style, double releaseLead, String admission, String returnMode, String tabletopContact) {
             this.x = x; this.z = z; this.yaw = yaw; this.vertical = vertical;
             this.hip = hip; this.knee = knee; this.ankle = ankle; this.sacroiliac = sacroiliac;
             this.lShoulderFlexion = lShoulderFlexion; this.rShoulderFlexion = rShoulderFlexion; this.lShoulderAbduct = lShoulderAbduct; this.rShoulderAbduct = rShoulderAbduct;
@@ -432,6 +443,17 @@ public final class SeatedScene {
             this.style = style;
             if (releaseLead < 0 || releaseLead > .5) throw new IllegalArgumentException("Invalid gesture release lead");
             this.releaseLead = releaseLead;
+            if (!"all".equals(admission) && !"ideational-main".equals(admission))
+                throw new IllegalArgumentException("Invalid gesture admission policy: " + admission);
+            this.admission = admission;
+            if (!"workspace".equals(returnMode) && !"direct".equals(returnMode))
+                throw new IllegalArgumentException("Invalid gesture return mode: " + returnMode);
+            this.directReturn = "direct".equals(returnMode);
+            if (!"true".equals(tabletopContact) && !"false".equals(tabletopContact))
+                throw new IllegalArgumentException("Invalid tabletop contact setting: " + tabletopContact);
+            this.tabletopContact = "true".equals(tabletopContact);
+            if (this.tabletopContact && !this.directReturn)
+                throw new IllegalArgumentException("Tabletop contact requires a separated direct-return rest");
         }
         double arm(String name, double fallback) { Double value = armOverrides.get(name); return value == null ? fallback : value.doubleValue(); }
     }
@@ -491,16 +513,22 @@ public final class SeatedScene {
             handModel = handModel.withFixedPose(actual).withBoundaries(HandCollision.Boundaries.seated(
                     table[0], table[1], table[2], table[3], table[4], pose.x, pose.vertical / 1000.0, pose.z));
             handBase = Collections.unmodifiableMap(armBases());
+            if (pose.tabletopContact) handModel = handModel.withTableContactRest(handBase, .03);
             HandCollision.Metrics resting = handModel.measure(handBase);
             System.out.println("GMIT_BODY_SAFETY baseline actor=" + actor + " torso=" + resting.handsToTorso
                     + " upper_arm=" + resting.handsToUpperArms + " table=" + resting.tabletop
                     + " upper_arm_torso=" + resting.upperArmsToTorso + " upper_arm_table=" + resting.upperArmsToTable
-                    + " table_bounds=" + Arrays.toString(table));
+                    + " table_bounds=" + Arrays.toString(table)
+                    + " tabletop_contact=" + pose.tabletopContact + " contact_release_m=" + (pose.tabletopContact ? .03 : 0));
             if (resting.boundaryMinimum() < -1e-8)
                 throw new IllegalStateException("Resting hands violate body/table boundaries for " + actor);
             handClearance = handModel.recommendedClearance(handBase);
-            handContact = handModel.measure(handBase).minimum();
-            fingerPalmContact = handModel.measure(handBase).fingerPalm;
+            if (pose.directReturn && (resting.minimum() < handClearance || resting.fingerPalm < handClearance))
+                throw new IllegalStateException("Direct return requires separated resting hands for " + actor);
+            // A separated rest pose needs the normal air gap, not its entire
+            // initial hand distance enforced on every semantic gesture.
+            handContact = Math.min(handClearance, resting.minimum());
+            fingerPalmContact = Math.min(handClearance, resting.fingerPalm);
             System.out.println("GMIT_HAND_SAFETY workspace actor=" + actor + " offsets=" + pose.gestureOffsets);
             Files.write(new File(evidenceDirectory, "hand-skeleton-" + actor + ".txt").toPath(),
                     handModel.debugSnapshot().getBytes(StandardCharsets.UTF_8));
@@ -626,6 +654,7 @@ public final class SeatedScene {
             if (meaningTurn != null && !meaningTurn.restoredAt(safeCurrentFrame()))
                 throw new IllegalStateException("Meaning gesture is already active for " + actor);
             meaningTurn = new MeaningGesture.Turn(actor, eventId, seatedGestureGain(), pose.gestureOffsets, pose.style, pose.releaseLead);
+            meaningTurn.setDirectReturn(pose.directReturn);
             if (HAND_SAFETY) meaningTurn.setHandReturnPath(handOpeningPath, handOpeningWeights);
             observedMeaningMovement = false;
             observedMeaningRestored = false;
@@ -1015,7 +1044,7 @@ public final class SeatedScene {
         private double seatedGestureGain() {
             // Standing-stock shoulder/elbow deltas need a conservative seated
             // retarget. Wrist/finger handshapes remain unscaled in Turn.
-            String value = System.getProperty("gmit.meaningminer.seated_arm_gain", "0.35");
+            String value = System.getProperty("gmit.meaningminer.seated_arm_gain", "0.24");
             try { return Double.parseDouble(value); }
             catch (NumberFormatException invalid) { throw new IllegalArgumentException("Invalid gmit.meaningminer.seated_arm_gain", invalid); }
         }

@@ -42,6 +42,14 @@ public final class HandCollisionTest {
         require(smoothed.cleared, "previous projection remains collision-free");
         HandCollision.Result bounded = model.correct(crossed, base, 1, first.pose, crossed, clearance);
         require(bounded.cleared, "rate-limited correction remains safe from a prior safe projection");
+        requireCorrectionStep(bounded.pose, crossed, first.pose, crossed, 1.0,
+                "unsafe raw frame releases retained correction gradually when geometry permits");
+        require(correctionMagnitude(bounded.pose, crossed) < correctionMagnitude(first.pose, crossed) - 1e-9,
+                "unsafe raw frame actually releases correction rather than merely retaining it");
+        HandCollision.Result gentleReturn = model.correct(base, base, .5, first.pose, crossed, clearance);
+        require(gentleReturn.cleared, "safe return retains a prior corrective offset when needed");
+        requireCorrectionStep(gentleReturn.pose, base, first.pose, crossed, 1.0,
+                "safe return releases correction gradually instead of a six-degree jump");
         Map<String, Double> sparsePrior = new LinkedHashMap<String, Double>(crossed);
         sparsePrior.put("l_shoulder_flexion", Double.valueOf(10));
         HandCollision.Result seededRateBound = model.correct(crossed, base, 1, sparsePrior, crossed, clearance);
@@ -76,6 +84,52 @@ public final class HandCollisionTest {
         Map<String, Double> leftTurn = pose(90, 0);
         require(model.maxWorldResidual(knownLeftTurn(), leftTurn) < 1e-10, "pure FK applies the known 90-degree shoulder rotation");
         HandCollision.Metrics baseMetrics = model.measure(base);
+        HandCollision.Boundaries contactTable = HandCollision.Boundaries.seated(-10, 10, -10, 10, -.18, 0, 0, 0);
+        HandCollision.Model ordinaryContactTable = model.withBoundaries(contactTable);
+        require(ordinaryContactTable.measure(base).tabletop < -.007,
+                "ordinary table padding keeps calibrated palms visibly above the physical surface");
+        HandCollision.Model contactRest = ordinaryContactTable.withTableContactRest(base, .03);
+        require(Math.abs(contactRest.measure(base).tabletop) < 1e-9,
+                "contact rest removes only the extra table padding at the calibrated palm surface");
+        HandCollision.Model penetratingContactRest = model.withBoundaries(
+                HandCollision.Boundaries.seated(-10, 10, -10, 10, -.16, 0, 0, 0)).withTableContactRest(base, .03);
+        require(penetratingContactRest.measure(base).tabletop < -.019,
+                "contact rest still rejects physical penetration below the table surface");
+        Map<String, Double> translatedPalm = new LinkedHashMap<String, Double>(base);
+        translatedPalm.put("l_shoulder_abduct", Double.valueOf(20));
+        require(contactRest.measure(translatedPalm).tabletop < -.007,
+                "translated palm leaving the envelope regains ordinary table padding");
+        Map<String, Double> rotatedPalm = new LinkedHashMap<String, Double>(base);
+        rotatedPalm.put("l_wrist_flexion", Double.valueOf(30));
+        require(contactRest.measure(rotatedPalm).tabletop < -.007,
+                "rotated palm leaving the envelope regains ordinary table padding");
+        HandCollision.Model forearmGuard = model.withBoundaries(
+                HandCollision.Boundaries.seated(-1.05, -.95, 1.2, 1.8, .10, 0, 0, 0));
+        HandCollision.Model forearmContactGuard = forearmGuard.withTableContactRest(base, .03);
+        require(Math.abs(forearmGuard.measure(base).tabletop - forearmContactGuard.measure(base).tabletop) < 1e-10
+                        && forearmContactGuard.measure(base).tabletop < 0,
+                "forearm tabletop padding remains unchanged by hand contact allowance");
+        HandCollision.Model copiedContactRest = model.withTableContactRest(base, .03).withFixedPose(base).withBoundaries(contactTable);
+        require(Math.abs(copiedContactRest.measure(new LinkedHashMap<String, Double>()).tabletop) < 1e-9,
+                "fixed-pose and boundary builders preserve contact calibration");
+        Map<String, Double> mutableContactRest = new LinkedHashMap<String, Double>(base);
+        HandCollision.Model copiedInputContactRest = ordinaryContactTable.withTableContactRest(mutableContactRest, .03);
+        mutableContactRest.put("l_shoulder_abduct", Double.valueOf(20));
+        require(Math.abs(copiedInputContactRest.measure(base).tabletop) < 1e-9,
+                "contact calibration deep-copies caller-owned rest values");
+        require(Math.abs(roundTrip(contactRest).measure(base).tabletop) < 1e-9,
+                "serialized contact calibration preserves physical tabletop contact");
+        boolean rejectedContactRest = false;
+        try { contactRest.withTableContactRest(base, 0); } catch (IllegalArgumentException expected) { rejectedContactRest = true; }
+        require(rejectedContactRest, "zero tabletop contact release distance is rejected");
+        rejectedContactRest = false;
+        try { contactRest.withTableContactRest(base, Double.NaN); } catch (IllegalArgumentException expected) { rejectedContactRest = true; }
+        require(rejectedContactRest, "non-finite tabletop contact release distance is rejected");
+        Map<String, Double> nonFiniteContactRest = new LinkedHashMap<String, Double>(base);
+        nonFiniteContactRest.put("l_wrist_flexion", Double.valueOf(Double.NaN));
+        rejectedContactRest = false;
+        try { contactRest.withTableContactRest(nonFiniteContactRest, .03); } catch (IllegalArgumentException expected) { rejectedContactRest = true; }
+        require(rejectedContactRest, "non-finite tabletop contact rest is rejected");
         HandCollision.Model boundedModel = model.withBoundaries(HandCollision.Boundaries.seated(-3, 3, 1.5, 3, .1, 0, 0, 0));
         HandCollision.Metrics boundaryMetrics = boundedModel.measure(base);
         require(boundaryMetrics.minimum() == baseMetrics.minimum(), "body/table guards do not change the calibrated clasp baseline category");
@@ -88,6 +142,10 @@ public final class HandCollisionTest {
         HandCollision.Model bodyOnlyModel = model.withBoundaries(HandCollision.Boundaries.seated(-3, 3, 1.5, 3, -100, 0, 0, 0));
         require(bodyOnlyModel.measure(base).handsToUpperArms >= 0, "normal elbow adjacency is not treated as a hand-to-own-upper-arm collision");
         require(bodyOnlyModel.measure(pose(90, 0)).handsToUpperArms < 0, "a folded hand touching an upper arm remains a body collision");
+        HandCollision.Model bodyContactModel = bodyOnlyModel.withTableContactRest(base, .03);
+        require(Math.abs(bodyContactModel.measure(pose(90, 0)).handsToUpperArms
+                        - bodyOnlyModel.measure(pose(90, 0)).handsToUpperArms) < 1e-10,
+                "hand contact allowance does not weaken body collision guards");
         HandCollision.Model palmOnlyTable = model.withBoundaries(HandCollision.Boundaries.seated(-1.01, -0.99, 2.08, 2.12, -.05, 0, 0, 0));
         require(palmOnlyTable.measure(base).tabletop < 0, "palm-radius middle capsule catches tabletop contact beyond narrow finger rays");
         HandCollision.Model upperArmTable = model.withBoundaries(HandCollision.Boundaries.seated(-1.05, -.95, .2, .8, -.05, 0, 0, 0));
@@ -96,6 +154,22 @@ public final class HandCollisionTest {
                 baseMetrics.minimum() - .001, baseMetrics.minimum() - .001,
                 baseMetrics.fingerPalm + .001, baseMetrics.fingerPalm + .001);
         require(!dualGuard.cleared, "finger-to-opposite-palm guard rejects an otherwise passing old category");
+        HandCollision.Result exactRest = model.correct(base, base, 0, base, base,
+                clearance, clearance, clearance, clearance);
+        require(exactRest.cleared && exactRest.pose.equals(base),
+                "the final return frame emits the exact safe rest with the normal air gap");
+        Map<String, Double> terminalOneDegree = new LinkedHashMap<String, Double>(base);
+        terminalOneDegree.put("l_shoulder_flexion", Double.valueOf(1));
+        HandCollision.Result smoothTerminalRest = model.correct(base, base, 0, terminalOneDegree, base,
+                clearance, clearance, clearance, clearance);
+        require(smoothTerminalRest.cleared,
+                "the final exact rest accepts only the last one-degree correction release");
+        Map<String, Double> lingeringCorrection = new LinkedHashMap<String, Double>(base);
+        lingeringCorrection.put("l_shoulder_flexion", Double.valueOf(1.5));
+        HandCollision.Result unfinishedReturn = model.correct(base, base, 0, lingeringCorrection, base,
+                clearance, clearance, clearance, clearance);
+        require(!unfinishedReturn.cleared,
+                "exact-rest endpoint fails closed if a previous correction cannot decay within the frame rate bound");
         require(roundTrip(model).measure(base).minimum() == model.measure(base).minimum(), "numeric snapshot serializes without native handles");
         HandCollision.PathMargin margin = model.pathMargin(first.pose, bounded.pose, clearance, clearance);
         require(margin.safe(), "reported intermediate path margin is safe");
@@ -115,6 +189,20 @@ public final class HandCollisionTest {
             double delta = (projected.get(joint).doubleValue() - candidate.get(joint).doubleValue()) - (previousProjected.get(joint).doubleValue() - previousCandidate.get(joint).doubleValue());
             require(Math.abs(delta) <= 6.0 + 1e-9, message + ": " + joint + " delta=" + delta);
         }
+    }
+    private static void requireCorrectionStep(Map<String, Double> projected, Map<String, Double> candidate,
+            Map<String, Double> previousProjected, Map<String, Double> previousCandidate, double maximum, String message) {
+        for (String joint : new String[] {"l_shoulder_abduct", "r_shoulder_abduct", "l_shoulder_flexion", "r_shoulder_flexion", "l_elbow_flexion", "r_elbow_flexion"}) {
+            double prior = previousProjected.get(joint).doubleValue() - previousCandidate.get(joint).doubleValue();
+            double current = projected.get(joint).doubleValue() - candidate.get(joint).doubleValue();
+            require(Math.abs(current - prior) <= maximum + 1e-9, message + ": " + joint + " delta=" + (current - prior));
+        }
+    }
+    private static double correctionMagnitude(Map<String, Double> projected, Map<String, Double> candidate) {
+        double total = 0;
+        for (String joint : new String[] {"l_shoulder_abduct", "r_shoulder_abduct", "l_shoulder_flexion", "r_shoulder_flexion", "l_elbow_flexion", "r_elbow_flexion"})
+            total += Math.abs(projected.get(joint).doubleValue() - candidate.get(joint).doubleValue());
+        return total;
     }
     private static Map<String, double[]> knownZero() { Map<String, double[]> result = new LinkedHashMap<String, double[]>(); result.put("LeftArm", point(-1,0,0)); result.put("LeftForeArm", point(-1,0,1)); result.put("LeftHand", point(-1,0,2)); result.put("RightArm", point(1,0,0)); result.put("RightForeArm", point(1,0,1)); result.put("RightHand", point(1,0,2)); return result; }
     private static Map<String, double[]> knownLeftTurn() { Map<String, double[]> result = knownZero(); result.put("LeftForeArm", point(0,0,0)); result.put("LeftHand", point(1,0,0)); return result; }

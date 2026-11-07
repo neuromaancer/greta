@@ -19,6 +19,8 @@ import java.util.Set;
 public final class HandCollision {
     private static final double EPSILON = 1e-9;
     private static final double MAX_CORRECTION_STEP = 6.0;
+    private static final double RELAX_CORRECTION_STEP = 1.0;
+    private static final int CONTINUITY_REFINEMENT_STEPS = 12;
     private HandCollision() { }
 
     /** Capture only primitive snapshot values while the caller is on Ogre's thread. */
@@ -67,31 +69,43 @@ public final class HandCollision {
         /* Null is intentional for version-1 local diagnostic snapshots. */
         private final Map<String, Double> fixedPose;
         private final Boundaries boundaries;
+        /* Optional calibrated rest that permits physical palm/table contact only. */
+        private final TableContactRest tableContactRest;
+        private final Map<String, Vec> tableContactLandmarks;
 
         Model(Map<String, Bone> bones, Map<String, Mapper> mappers) {
-            this(bones, mappers, Collections.<String, Double>emptyMap(), Boundaries.none());
+            this(bones, mappers, Collections.<String, Double>emptyMap(), Boundaries.none(), null);
         }
-        private Model(Map<String, Bone> bones, Map<String, Mapper> mappers, Map<String, Double> fixedPose, Boundaries boundaries) {
+        private Model(Map<String, Bone> bones, Map<String, Mapper> mappers, Map<String, Double> fixedPose, Boundaries boundaries, TableContactRest tableContactRest) {
             this.bones = Collections.unmodifiableMap(new LinkedHashMap<String, Bone>(bones));
             this.mappers = Collections.unmodifiableMap(new LinkedHashMap<String, Mapper>(mappers));
             this.fixedPose = fixedPose == null ? Collections.<String, Double>emptyMap() : Collections.unmodifiableMap(new LinkedHashMap<String, Double>(fixedPose));
             this.boundaries = boundaries == null ? Boundaries.none() : boundaries;
+            this.tableContactRest = tableContactRest;
             requireArm(bones, "LeftHandIndex1"); requireArm(bones, "LeftHandMiddle1"); requireArm(bones, "LeftHandPinky1");
             requireArm(bones, "RightHandIndex1"); requireArm(bones, "RightHandMiddle1"); requireArm(bones, "RightHandPinky1");
             for (String side : new String[] {"Left", "Right"}) for (String finger : new String[] {"Thumb", "Index", "Middle", "Ring", "Pinky"}) for (int joint = 1; joint <= 4; joint++) requireArm(bones, side + "Hand" + finger + joint);
+            this.tableContactLandmarks = tableContactRest == null ? Collections.<String, Vec>emptyMap()
+                    : contactLandmarks(tableContactRest.pose);
         }
 
         /** Captures a fixed non-arm context; explicit candidate values still win. */
         public Model withFixedPose(Map<String, Double> context) {
             if (context == null) throw new IllegalArgumentException("Fixed pose is required");
-            return new Model(bones, mappers, context, boundaries);
+            return new Model(bones, mappers, context, boundaries, tableContactRest);
         }
 
         /** Adds immutable seated-workspace boundaries without mutating this snapshot. */
         public Model withBoundaries(Boundaries next) {
             if (next == null) throw new IllegalArgumentException("Boundaries are required");
             if (next.bodyEnabled) requireTorso(bones);
-            return new Model(bones, mappers, fixedPose, next);
+            return new Model(bones, mappers, fixedPose, next, tableContactRest);
+        }
+
+        /** Opt in to physical tabletop contact at one calibrated rest pose. */
+        public Model withTableContactRest(Map<String, Double> calibratedRest, double releaseDistance) {
+            return new Model(bones, mappers, fixedPose, boundaries,
+                    new TableContactRest(calibratedRest, releaseDistance));
         }
 
         /** Evaluates a degree-valued BAP pose without accessing native Ogre state. */
@@ -141,15 +155,15 @@ public final class HandCollision {
             if (!active.enabled()) return BoundaryMetrics.NONE;
             Map<String, Vec> points = pose(degrees, world);
             List<BoundarySegment> moving = new ArrayList<BoundarySegment>();
-            BoundarySegment leftForearmSegment = new BoundarySegment(new Segment(leftForearm, leftHand), leftForearmRadius);
-            BoundarySegment rightForearmSegment = new BoundarySegment(new Segment(rightForearm, rightHand), rightForearmRadius);
+            BoundarySegment leftForearmSegment = new BoundarySegment(new Segment(leftForearm, leftHand), leftForearmRadius, "Left", false);
+            BoundarySegment rightForearmSegment = new BoundarySegment(new Segment(rightForearm, rightHand), rightForearmRadius, "Right", false);
             moving.add(leftForearmSegment); moving.add(rightForearmSegment);
             // The finger rays do not cover the palm's solid centre.  Retain a
             // dedicated middle-ray capsule at the captured palm radius.
-            moving.add(new BoundarySegment(new Segment(leftHand, points.get("LeftHandMiddle1")), leftPalm));
-            moving.add(new BoundarySegment(new Segment(rightHand, points.get("RightHandMiddle1")), rightPalm));
-            for (Segment segment : fingerSegments("Left", points)) moving.add(new BoundarySegment(segment, leftPalm * .22));
-            for (Segment segment : fingerSegments("Right", points)) moving.add(new BoundarySegment(segment, rightPalm * .22));
+            moving.add(new BoundarySegment(new Segment(leftHand, points.get("LeftHandMiddle1")), leftPalm, "Left", true));
+            moving.add(new BoundarySegment(new Segment(rightHand, points.get("RightHandMiddle1")), rightPalm, "Right", true));
+            for (Segment segment : fingerSegments("Left", points)) moving.add(new BoundarySegment(segment, leftPalm * .22, "Left", true));
+            for (Segment segment : fingerSegments("Right", points)) moving.add(new BoundarySegment(segment, rightPalm * .22, "Right", true));
             double torso = Double.POSITIVE_INFINITY, upper = Double.POSITIVE_INFINITY, table = Double.POSITIVE_INFINITY;
             double upperTorso = Double.POSITIVE_INFINITY, upperTable = Double.POSITIVE_INFINITY;
             if (active.bodyEnabled) {
@@ -177,12 +191,40 @@ public final class HandCollision {
             if (active.table != null) {
                 double shoulderWidth = leftArm.distance(rightArm);
                 double upperRadius = Math.max(Math.max(leftForearmRadius, rightForearmRadius), shoulderWidth * active.upperArmRadiusScale);
+                double leftTableMargin = tableMargin(active, points, "Left");
+                double rightTableMargin = tableMargin(active, points, "Right");
                 for (BoundarySegment movingSegment : moving)
-                table = Math.min(table, active.table.clearance(active.toWorld(movingSegment.segment.start), active.toWorld(movingSegment.segment.end), movingSegment.radius + active.tableMargin));
+                    table = Math.min(table, active.table.clearance(active.toWorld(movingSegment.segment.start), active.toWorld(movingSegment.segment.end),
+                            movingSegment.radius + (movingSegment.handSurface
+                                    ? (movingSegment.side.equals("Left") ? leftTableMargin : rightTableMargin)
+                                    : active.tableMargin)));
                 upperTable = Math.min(upperTable, active.table.clearance(active.toWorld(leftArm), active.toWorld(leftForearm), upperRadius + active.tableMargin));
                 upperTable = Math.min(upperTable, active.table.clearance(active.toWorld(rightArm), active.toWorld(rightForearm), upperRadius + active.tableMargin));
             }
             return new BoundaryMetrics(torso, upper, table, upperTorso, upperTable);
+        }
+
+        private double tableMargin(Boundaries active, Map<String, Vec> points, String side) {
+            if (tableContactRest == null) return active.tableMargin;
+            double displacement = 0;
+            for (String name : contactPoints(side))
+                displacement = Math.max(displacement, points.get(name).distance(tableContactLandmarks.get(name)));
+            double t = clamp(displacement / tableContactRest.releaseDistance, 0, 1);
+            double smooth = t * t * (3 - 2 * t);
+            return active.tableMargin * smooth;
+        }
+
+        private static String[] contactPoints(String side) {
+            return new String[] {side + "Hand", side + "HandMiddle1", side + "HandIndex1", side + "HandPinky1"};
+        }
+
+        private Map<String, Vec> contactLandmarks(Map<String, Double> rest) {
+            Map<String, Transform> restWorld = new LinkedHashMap<String, Transform>();
+            Map<String, Double> restPose = resolvedPose(rest);
+            Map<String, Vec> result = new LinkedHashMap<String, Vec>();
+            for (String side : new String[] {"Left", "Right"}) for (String name : contactPoints(side))
+                result.put(name, position(name, restPose, restWorld));
+            return Collections.unmodifiableMap(result);
         }
 
         private static Segment trimmedUpperArm(Vec shoulder, Vec elbow) {
@@ -318,23 +360,62 @@ public final class HandCollision {
             Metrics before = measure(projected);
             if (phaseWeight == 0) {
                 Metrics clasp = measure(base);
-                Map<String, Double> rateLimited = boundedCorrection(base, base, previousProjected, previousCandidate);
+                // The terminal exact-rest frame may not hide a six-degree snap.
+                // It is accepted only after the same gradual-release bound used
+                // during return has brought every corrective offset to zero.
+                Map<String, Double> released = relaxedCorrection(base, previousProjected, previousCandidate);
                 boolean endpointSafe = clasp.minimum() >= clearance && clasp.fingerPalm >= fingerPalmClearance && clasp.boundaryMinimum() >= 0;
                 boolean pathSafe = previousProjected == null || safePath(previousProjected, base, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
-                return new Result(new LinkedHashMap<String, Double>(base), before, clasp, samePose(candidate, base) && samePose(rateLimited, base) && endpointSafe && pathSafe, 0);
+                return new Result(new LinkedHashMap<String, Double>(base), before, clasp, samePose(candidate, base) && samePose(released, base) && endpointSafe && pathSafe, 0);
+            }
+            // Release as soon as geometry permits, even while the raw candidate
+            // itself is still unsafe. Waiting for raw safety holds a large
+            // correction until the final return frames and causes a terminal
+            // discontinuity at a fixed 60-frame direct-return duration.
+            if (previousProjected != null && previousCandidate != null) {
+                Map<String, Double> retained = retainedCorrection(candidate, previousProjected, previousCandidate);
+                Metrics retainedMetrics = measure(retained);
+                boolean retainedSafe = retainedMetrics.minimum() >= clearance && retainedMetrics.fingerPalm >= fingerPalmClearance
+                        && retainedMetrics.boundaryMinimum() >= 0 && safePath(previousProjected, retained, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                if (retainedSafe) {
+                    Map<String, Double> relaxed = relaxedCorrection(candidate, previousProjected, previousCandidate);
+                    Metrics relaxedMetrics = measure(relaxed);
+                    if (relaxedMetrics.minimum() >= clearance && relaxedMetrics.fingerPalm >= fingerPalmClearance
+                            && relaxedMetrics.boundaryMinimum() >= 0 && safePath(previousProjected, relaxed, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance))
+                        return new Result(relaxed, before, relaxedMetrics, true, maxCorrection(relaxed, candidate));
+                    Map<String, Double> selective = selectiveRelaxation(candidate, retained, previousProjected, previousCandidate,
+                            previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                    if (selective != null) {
+                        Metrics selectiveMetrics = measure(selective);
+                        return new Result(selective, before, selectiveMetrics, true, maxCorrection(selective, candidate));
+                    }
+                    return new Result(retained, before, retainedMetrics, true, maxCorrection(retained, candidate));
+                }
             }
             if (before.minimum() >= clearance && before.fingerPalm >= fingerPalmClearance && before.boundaryMinimum() >= 0) {
-                Map<String, Double> decayed = boundedCorrection(candidate, candidate, previousProjected, previousCandidate);
-                Metrics decayedMetrics = measure(decayed);
-                if (decayedMetrics.minimum() >= clearance && decayedMetrics.fingerPalm >= fingerPalmClearance && decayedMetrics.boundaryMinimum() >= 0 && safePath(previousProjected, decayed, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance))
-                    return new Result(decayed, before, decayedMetrics, true, maxCorrection(decayed, candidate));
+                // A raw return frame can already be safe while an earlier coarse
+                // correction remains active. Preserve that safe offset first,
+                // then release only one degree per frame when its swept path is
+                // safe. This avoids alternating six-degree decay/re-entry.
+                Map<String, Double> retained = retainedCorrection(candidate, previousProjected, previousCandidate);
+                Metrics retainedMetrics = measure(retained);
+                boolean retainedSafe = retainedMetrics.minimum() >= clearance && retainedMetrics.fingerPalm >= fingerPalmClearance
+                        && retainedMetrics.boundaryMinimum() >= 0 && safePath(previousProjected, retained, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                if (retainedSafe) {
+                    Map<String, Double> relaxed = relaxedCorrection(candidate, previousProjected, previousCandidate);
+                    Metrics relaxedMetrics = measure(relaxed);
+                    if (relaxedMetrics.minimum() >= clearance && relaxedMetrics.fingerPalm >= fingerPalmClearance
+                            && relaxedMetrics.boundaryMinimum() >= 0 && safePath(previousProjected, relaxed, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance))
+                        return new Result(relaxed, before, relaxedMetrics, true, maxCorrection(relaxed, candidate));
+                    return new Result(retained, before, retainedMetrics, true, maxCorrection(retained, candidate));
+                }
             }
 
             // Asset mirroring and the animated finger path make symmetric arm
             // changes insufficient. Search six bounded corrective DOFs, but
             // seed them independently rather than evaluating a 3^6 cube on a
             // 25 fps callback path.
-            projected = boundedCorrection(candidate, candidate, previousProjected, previousCandidate);
+            projected = retainedCorrection(candidate, previousProjected, previousCandidate);
             Metrics after = measure(projected); PathMargins initialMargins = pathMargins(previousProjected, projected, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance); double score = safetyScore(after, initialMargins.existing, initialMargins.fingerPalm, initialMargins.boundary, clearance, fingerPalmClearance);
             if (score >= -1e-8) return new Result(projected, before, after, true, maxCorrection(projected, candidate));
             // Coordinated changes can be missed by a local one-joint walk.
@@ -364,7 +445,12 @@ public final class HandCollision {
                     safeSeedDistance = distance; safeSeedRawDistance = rawDistance;
                 }
             }
-            if (safeSeed != null) return new Result(safeSeed, before, safeSeedMetrics, true, maxCorrection(safeSeed, candidate));
+            if (safeSeed != null) {
+                safeSeed = refineTowardPrevious(safeSeed, candidate, previousProjected, previousCandidate,
+                        previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                safeSeedMetrics = measure(safeSeed);
+                return new Result(safeSeed, before, safeSeedMetrics, true, maxCorrection(safeSeed, candidate));
+            }
             // A transition can require coordinated motion in more than one
             // shoulder/elbow pair.  Only after the inexpensive sparse probes
             // fail, evaluate the finite 2^6 rate-bounded corner set.
@@ -382,7 +468,12 @@ public final class HandCollision {
                     safeSeedDistance = distance; safeSeedRawDistance = rawDistance;
                 }
             }
-            if (safeSeed != null) return new Result(safeSeed, before, safeSeedMetrics, true, maxCorrection(safeSeed, candidate));
+            if (safeSeed != null) {
+                safeSeed = refineTowardPrevious(safeSeed, candidate, previousProjected, previousCandidate,
+                        previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                safeSeedMetrics = measure(safeSeed);
+                return new Result(safeSeed, before, safeSeedMetrics, true, maxCorrection(safeSeed, candidate));
+            }
             Search best = new Search(projected, after, score);
             Collections.sort(seedBeam, new Comparator<Search>() { @Override public int compare(Search a, Search b) { return Double.compare(b.score, a.score); } });
             List<Search> beam = new ArrayList<Search>();
@@ -404,7 +495,11 @@ public final class HandCollision {
                     Metrics measured = measure(trial); PathMargins margins = pathMargins(previousProjected, trial, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance); double trialScore = safetyScore(measured, margins.existing, margins.fingerPalm, margins.boundary, clearance, fingerPalmClearance);
                     Search found = new Search(trial, measured, trialScore); next.add(found);
                     if (found.score > best.score) best = found;
-                    if (trialScore >= -1e-8) return new Result(trial, before, measured, true, maxCorrection(trial, candidate));
+                    if (trialScore >= -1e-8) {
+                        trial = refineTowardPrevious(trial, candidate, previousProjected, previousCandidate,
+                                previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                        return new Result(trial, before, measure(trial), true, maxCorrection(trial, candidate));
+                    }
                 }
                 if (next.isEmpty()) break;
                 Collections.sort(next, new Comparator<Search>() { @Override public int compare(Search a, Search b) { return Double.compare(b.score, a.score); } });
@@ -438,6 +533,116 @@ public final class HandCollision {
                 results.add(correctionSeed(candidate, joints, correction));
             }
             return results;
+        }
+
+        /** Reuses the previous corrective offset without changing raw arm targets. */
+        private Map<String, Double> retainedCorrection(Map<String, Double> candidate,
+                Map<String, Double> previousProjected, Map<String, Double> previousCandidate) {
+            if (previousProjected == null || previousCandidate == null) return candidate;
+            Map<String, Double> output = new LinkedHashMap<String, Double>(candidate);
+            for (String joint : correctionJoints()) {
+                Double raw = candidate.get(joint), prior = previousProjected.get(joint), priorRaw = previousCandidate.get(joint);
+                if (raw == null || prior == null || priorRaw == null) continue;
+                double priorCorrection = prior.doubleValue() - priorRaw.doubleValue();
+                if (priorCorrection < correctionMinimum(joint) - EPSILON || priorCorrection > correctionMaximum(joint) + EPSILON)
+                    throw new IllegalArgumentException("Previous hand correction is outside the bounded workspace: " + joint);
+                output.put(joint, Double.valueOf(raw.doubleValue() + clamp(priorCorrection, correctionMinimum(joint), correctionMaximum(joint))));
+            }
+            return output;
+        }
+
+        /** Releases a retained correction at a deliberately smaller rate than corrective entry. */
+        private Map<String, Double> relaxedCorrection(Map<String, Double> candidate,
+                Map<String, Double> previousProjected, Map<String, Double> previousCandidate) {
+            if (previousProjected == null || previousCandidate == null) return candidate;
+            Map<String, Double> output = new LinkedHashMap<String, Double>(candidate);
+            for (String joint : correctionJoints()) {
+                Double raw = candidate.get(joint), prior = previousProjected.get(joint), priorRaw = previousCandidate.get(joint);
+                if (raw == null || prior == null || priorRaw == null) continue;
+                double priorCorrection = prior.doubleValue() - priorRaw.doubleValue();
+                if (priorCorrection < correctionMinimum(joint) - EPSILON || priorCorrection > correctionMaximum(joint) + EPSILON)
+                    throw new IllegalArgumentException("Previous hand correction is outside the bounded workspace: " + joint);
+                double released = priorCorrection - Math.signum(priorCorrection) * Math.min(Math.abs(priorCorrection), RELAX_CORRECTION_STEP);
+                output.put(joint, Double.valueOf(raw.doubleValue() + released));
+            }
+            return output;
+        }
+
+        /**
+         * When releasing every axis together crosses the tabletop boundary,
+         * release only a safe subset. Every changed axis still moves at most
+         * one degree toward its raw target; no new corrective direction is
+         * introduced. The finite 2^6 search is only entered after full release
+         * was unsafe and retains the greatest verified progress toward zero.
+         */
+        private Map<String, Double> selectiveRelaxation(Map<String, Double> candidate, Map<String, Double> retained,
+                Map<String, Double> previousProjected, Map<String, Double> previousCandidate,
+                double previousClearance, double clearance, double previousFingerPalmClearance, double fingerPalmClearance) {
+            String[] joints = correctionJoints();
+            double retainedMagnitude = correctionMagnitude(retained, candidate);
+            int activeMask = 0;
+            for (int index = 0; index < joints.length; index++) {
+                Double raw = candidate.get(joints[index]), value = retained.get(joints[index]);
+                if (raw != null && value != null && Math.abs(value.doubleValue() - raw.doubleValue()) > EPSILON) activeMask |= 1 << index;
+            }
+            Map<String, Double> best = null;
+            double bestMagnitude = retainedMagnitude, bestScore = -Double.MAX_VALUE;
+            for (int mask = 1; mask < (1 << joints.length); mask++) {
+                if ((mask & ~activeMask) != 0 || mask == activeMask) continue;
+                Map<String, Double> trial = new LinkedHashMap<String, Double>(retained);
+                for (int index = 0; index < joints.length; index++) if ((mask & (1 << index)) != 0) {
+                    String joint = joints[index]; Double raw = candidate.get(joint), value = retained.get(joint);
+                    if (raw == null || value == null) continue;
+                    double correction = value.doubleValue() - raw.doubleValue();
+                    double released = correction - Math.signum(correction) * Math.min(Math.abs(correction), RELAX_CORRECTION_STEP);
+                    trial.put(joint, Double.valueOf(raw.doubleValue() + released));
+                }
+                Metrics measured = measure(trial);
+                if (measured.minimum() < clearance || measured.fingerPalm < fingerPalmClearance || measured.boundaryMinimum() < 0) continue;
+                PathMargins margins = pathMargins(previousProjected, trial, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
+                if (!margins.existing.safe() || !margins.fingerPalm.safe() || !margins.boundary.safe()) continue;
+                double magnitude = correctionMagnitude(trial, candidate);
+                if (magnitude >= retainedMagnitude - EPSILON) continue;
+                double score = safetyScore(measured, margins.existing, margins.fingerPalm, margins.boundary, clearance, fingerPalmClearance);
+                if (best == null || magnitude < bestMagnitude - EPSILON
+                        || (Math.abs(magnitude - bestMagnitude) <= EPSILON && score > bestScore)) {
+                    best = trial; bestMagnitude = magnitude; bestScore = score;
+                }
+            }
+            return best;
+        }
+
+        private double correctionMagnitude(Map<String, Double> pose, Map<String, Double> candidate) {
+            double total = 0;
+            for (String joint : correctionJoints()) {
+                Double value = pose.get(joint), raw = candidate.get(joint);
+                if (value != null && raw != null) total += Math.abs(value.doubleValue() - raw.doubleValue());
+            }
+            return total;
+        }
+
+        /** Finds the nearest safe point between the retained correction and a coarse safe seed. */
+        private Map<String, Double> refineTowardPrevious(Map<String, Double> safeSeed, Map<String, Double> candidate,
+                Map<String, Double> previousProjected, Map<String, Double> previousCandidate,
+                double previousClearance, double clearance, double previousFingerPalmClearance, double fingerPalmClearance) {
+            if (previousProjected == null || previousCandidate == null) return safeSeed;
+            Map<String, Double> retained = retainedCorrection(candidate, previousProjected, previousCandidate);
+            for (int step = 1; step < CONTINUITY_REFINEMENT_STEPS; step++) {
+                double weight = step / (double)CONTINUITY_REFINEMENT_STEPS;
+                Map<String, Double> trial = new LinkedHashMap<String, Double>(candidate);
+                for (String joint : correctionJoints()) {
+                    Double raw = candidate.get(joint), from = retained.get(joint), to = safeSeed.get(joint);
+                    if (raw != null && from != null && to != null)
+                        trial.put(joint, Double.valueOf(from.doubleValue() * (1.0 - weight) + to.doubleValue() * weight));
+                }
+                trial = boundedCorrection(trial, candidate, previousProjected, previousCandidate);
+                Metrics measured = measure(trial);
+                if (measured.minimum() >= clearance && measured.fingerPalm >= fingerPalmClearance
+                        && measured.boundaryMinimum() >= 0
+                        && safePath(previousProjected, trial, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance))
+                    return trial;
+            }
+            return safeSeed;
         }
 
         private Map<String, Double> boundedCorrection(Map<String, Double> desiredPose, Map<String, Double> candidate,
@@ -560,6 +765,25 @@ public final class HandCollision {
             this.pose = Collections.unmodifiableMap(new LinkedHashMap<String, Double>(pose)); this.before = before; this.after = after; this.cleared = cleared; this.maxCorrectionDegrees = maxCorrectionDegrees;
         }
     }
+    /** Immutable local calibration for a zero-extra-padding tabletop rest. */
+    private static final class TableContactRest implements Serializable {
+        private static final long serialVersionUID = 1L;
+        final Map<String, Double> pose;
+        final double releaseDistance;
+        TableContactRest(Map<String, Double> pose, double releaseDistance) {
+            if (pose == null || pose.isEmpty() || !finite(releaseDistance) || releaseDistance <= 0)
+                throw new IllegalArgumentException("A finite non-empty tabletop contact rest and positive release distance are required");
+            Map<String, Double> copy = new LinkedHashMap<String, Double>();
+            for (Map.Entry<String, Double> entry : pose.entrySet()) {
+                if (entry.getKey() == null || entry.getValue() == null || !finite(entry.getValue().doubleValue()))
+                    throw new IllegalArgumentException("Tabletop contact rest contains an invalid BAP value");
+                copy.put(entry.getKey(), Double.valueOf(entry.getValue().doubleValue()));
+            }
+            this.pose = Collections.unmodifiableMap(copy);
+            this.releaseDistance = releaseDistance;
+        }
+    }
+
     /**
      * Immutable conservative proxies for the seated workspace.  They are not
      * a character mesh or physics solver: callers must provide table bounds in
@@ -748,7 +972,10 @@ public final class HandCollision {
     }
     private static final class Transform { static final Transform IDENTITY=new Transform(Quat.IDENTITY,new Vec(0,0,0)); final Quat rotation; final Vec position; Transform(Quat r,Vec p){rotation=r;position=p;} }
     private static final class Segment { final Vec start,end; Segment(Vec start,Vec end){this.start=start;this.end=end;} }
-    private static final class BoundarySegment { final Segment segment; final double radius; BoundarySegment(Segment segment,double radius){this.segment=segment;this.radius=radius;} }
+    private static final class BoundarySegment {
+        final Segment segment; final double radius; final String side; final boolean handSurface;
+        BoundarySegment(Segment segment,double radius,String side,boolean handSurface){this.segment=segment;this.radius=radius;this.side=side;this.handSurface=handSurface;}
+    }
     private static final class Search { final Map<String,Double> pose; final Metrics metrics; final double score; Search(Map<String,Double> pose, Metrics metrics, double score){this.pose=pose;this.metrics=metrics;this.score=score;} }
 
     private static void requireArm(Map<String,Bone> bones,String name){if(!bones.containsKey(name))throw new IllegalStateException("Autodesk snapshot lacks required arm bone "+name);}

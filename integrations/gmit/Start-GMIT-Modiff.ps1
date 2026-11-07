@@ -2,7 +2,7 @@ param(
     [string]$Runtime,
     [string]$Replay,
     [switch]$Preview,
-    [switch]$MeaningMiner, [switch]$DisableHandSafety,
+    [switch]$MeaningMiner, [switch]$DisableHandSafety, [switch]$DisableListenerNods,
     [switch]$Muted,
     [string]$Distribution = 'Ubuntu',
     [string]$PythonPath = $env:GRETA_MODIFF_PYTHON,
@@ -121,6 +121,7 @@ try {
     if ($Replay) { $launch.Replay = $Replay } else { $launch.GroupMI = $true }
     if ($Preview) { $launch.Preview = $true }
     if ($MeaningMiner) { $launch.MeaningMiner = $true }
+    if ($DisableListenerNods) { $launch.DisableListenerNods = $true }
     if ($DisableHandSafety) { $launch.DisableHandSafety = $true }
     if ($Muted) { $launch.Muted = $true }
     & $launcher @launch

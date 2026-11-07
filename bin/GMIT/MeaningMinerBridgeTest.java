@@ -29,8 +29,43 @@ public final class MeaningMinerBridgeTest {
         expectIo(() -> MeaningMinerBridge.validateEmissionKinds(Arrays.asList("SpeechSignal", "SpeechSignal"), 1));
         expectIo(() -> MeaningMinerBridge.validateEmissionKinds(Arrays.asList("SpeechSignal", "UnknownSignal"), 1));
         expectIo(() -> MeaningMinerBridge.validateEmissionKinds(Arrays.asList("SpeechSignal"), 2));
+        semanticAdmission();
         timeoutRestoresDiagnostic();
-        System.out.println("PASS xml_escape event_id text_boundary image_schema_filter");
+        System.out.println("PASS xml_escape event_id text_boundary image_schema_filter semantic_admission");
+    }
+    private static void semanticAdmission() throws Exception {
+        String global = "gmit.meaningminer.gesture.admission";
+        String actor = global + ".patient-a";
+        String previousGlobal = System.getProperty(global), previousActor = System.getProperty(actor);
+        try {
+            Intention speech = new Intention("speech", "", "s1");
+            IdeationalUnit unit = new IdeationalUnit("u1", "im-main");
+            Intention main = new Intention("imageschema", "path", "im-main");
+            Intention secondary = new Intention("imageschema", "container", "im-secondary");
+            Intention emphasis = new Intention("emphasis", "", "e1");
+            List<Object> values = Arrays.<Object>asList(speech, unit, main, secondary, emphasis);
+
+            System.clearProperty(global); System.clearProperty(actor);
+            require(MeaningMinerBridge.admittedIntentions("patient-a", values).equals(values), "default all admission");
+            System.setProperty(global, "ideational-main");
+            List<Object> admitted = MeaningMinerBridge.admittedIntentions("patient-a", values);
+            require(admitted.equals(Arrays.<Object>asList(speech, unit, main, emphasis)), "keep only main image schema and preserve other intentions");
+            require(main == admitted.get(2), "preserve admitted semantic object identity");
+            require(!admitted.contains(secondary), "suppress secondary schema as a whole");
+
+            System.setProperty(actor, "all");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", values).equals(values), "actor property overrides global policy");
+            System.clearProperty(actor);
+            List<Object> invalid = Arrays.<Object>asList(speech, new IdeationalUnit("u2", "missing"), main, secondary);
+            require(MeaningMinerBridge.admittedIntentions("patient-a", invalid).equals(invalid), "invalid main anchor preserves complete raw turn");
+            System.setProperty(global, "unsupported");
+            expect(() -> MeaningMinerBridge.admittedIntentions("patient-a", values));
+        } finally {
+            restoreProperty(global, previousGlobal); restoreProperty(actor, previousActor);
+        }
+    }
+    private static void restoreProperty(String name, String value) {
+        if (value == null) System.clearProperty(name); else System.setProperty(name, value);
     }
     private static void timeoutRestoresDiagnostic() throws Exception {
         File directory = Files.createTempDirectory("meaning-miner-bridge-test").toFile();
@@ -60,10 +95,20 @@ public final class MeaningMinerBridgeTest {
         if (!value) throw new AssertionError(detail);
     }
     public static final class Intention {
-        private final String name, type;
-        public Intention(String name, String type) { this.name = name; this.type = type; }
+        private final String name, type, id;
+        public Intention(String name, String type) { this(name, type, name + "-id"); }
+        public Intention(String name, String type, String id) { this.name = name; this.type = type; this.id = id; }
         public String getName() { return name; }
         public String getType() { return type; }
+        public String getId() { return id; }
+    }
+    public static final class IdeationalUnit {
+        private final String id, main;
+        public IdeationalUnit(String id, String main) { this.id = id; this.main = main; }
+        public String getName() { return "ideationalunit"; }
+        public String getType() { return ""; }
+        public String getId() { return id; }
+        public String getMainIntentionId() { return main; }
     }
     public static final class FakeChild {
         public static void main(String[] args) throws Exception {

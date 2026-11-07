@@ -1,8 +1,10 @@
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** Bounded listener eye/head tracking for the existing seated Autodesk avatars. */
@@ -12,10 +14,16 @@ public final class ListenerGaze {
     private static final boolean ENABLED = enabled("gmit.gaze.enabled");
     private static final boolean HEAD = enabled("gmit.gaze.head");
     private static final boolean EYES = enabled("gmit.gaze.eyes");
+    private static final boolean BACKCHANNEL = Boolean.parseBoolean(System.getProperty("gmit.gaze.backchannel", "true"));
     private static final int FRAME_MILLIS = 40; // Greta Constants.FRAME_DURATION_MILLIS (25 fps).
     private static final int LISTENER_DELAY_MILLIS = 200;
     private static final int MIDPOINT_MIN_MILLIS = 3500;
     private static final int MIDPOINT_TRANSITION_FRAMES = 28;
+    private static final int TRANSITION_FRAMES = 18;
+    private static final int HANDOFF_TRANSITION_FRAMES = 18;
+    private static final int NOD_DURATION_FRAMES = 12;
+    private static final int NOD_SETTLE_FRAMES = 2;
+    private static final double NOD_PITCH_RADIANS = Math.toRadians(4);
     private static volatile Throwable failure;
     private static String speaker;
     private static Method currentFrame;
@@ -44,7 +52,11 @@ public final class ListenerGaze {
         Actor target = actors.get(activeSpeaker);
         if (target == null) throw new IllegalArgumentException("Unknown gaze speaker: " + activeSpeaker);
         int now = ((Number)currentFrame.invoke(null)).intValue();
-        transition(activeSpeaker, null, now + 1, now + 1, now + 24);
+        for (Actor listener : actors.values()) if (listener != target) {
+            listener.shift(now, gazeAngles(listener, target), TRANSITION_FRAMES);
+            listener.publishTransition(now, now + 24);
+            GazeModiffAdapter.scheduleTarget(listener.id, target.id, now + 1);
+        }
         speaker = activeSpeaker;
     }
 
@@ -54,37 +66,123 @@ public final class ListenerGaze {
      */
     public static synchronized void scheduleSpeech(String activeSpeaker, String speakerPeer,
                                                     long audioStartMillis, long audioEndMillis) throws Exception {
+        scheduleSpeech(activeSpeaker, speakerPeer, null, audioStartMillis, audioEndMillis,
+                stableSeed(activeSpeaker, speakerPeer, audioStartMillis, audioEndMillis));
+    }
+
+    /** Schedules a bounded speech interval, including an optional actual next-speaker handoff. */
+    public static synchronized void scheduleSpeech(String activeSpeaker, String speakerPeer, String nextSpeaker,
+                                                    long audioStartMillis, long audioEndMillis) throws Exception {
+        scheduleSpeech(activeSpeaker, speakerPeer, nextSpeaker, audioStartMillis, audioEndMillis,
+                stableSeed(activeSpeaker, speakerPeer, audioStartMillis, audioEndMillis));
+    }
+
+    /**
+     * `seed` is supplied by the caller from stable session/event data so that a replay
+     * has the same bounded backchannel timing on every run.
+     */
+    public static synchronized void scheduleSpeech(String activeSpeaker, String speakerPeer, String nextSpeaker,
+                                                    long audioStartMillis, long audioEndMillis, long seed) throws Exception {
         checkHealthy();
         if (actors.isEmpty()) return;
-        Actor target = requireActor(activeSpeaker, "speaker");
-        Actor peer = requireActor(speakerPeer, "speaker peer");
-        if (target == peer) throw new IllegalArgumentException("Speaker cannot gaze at self: " + activeSpeaker);
+        requireActor(activeSpeaker, "speaker");
+        requireActor(speakerPeer, "speaker peer");
+        if (activeSpeaker.equals(speakerPeer)) throw new IllegalArgumentException("Speaker cannot gaze at self: " + activeSpeaker);
+        if (nextSpeaker != null) {
+            requireActor(nextSpeaker, "next speaker");
+            if (nextSpeaker.equals(activeSpeaker)) nextSpeaker = null; // A chunk continuation is not a handoff.
+        }
         if (audioEndMillis <= audioStartMillis || audioEndMillis - audioStartMillis > 15000)
             throw new IllegalArgumentException("Gaze requires a bounded audio interval of at most 15 seconds");
         int now = ((Number)currentFrame.invoke(null)).intValue();
-        int speakerFrame = Math.max(now + 1, frameAtOrAfter(audioStartMillis));
-        long desiredListenerMillis = audioStartMillis + LISTENER_DELAY_MILLIS;
-        int listenerFrame = Math.max(now + 1, frameAtOrAfter(desiredListenerMillis));
-        // Do not schedule a listener head switch after a short utterance has ended.
-        if ((long)listenerFrame * FRAME_MILLIS >= audioEndMillis) listenerFrame = -1;
-        int endFrame = frameAtOrAfter(audioEndMillis);
-        transition(activeSpeaker, speakerPeer, speakerFrame, listenerFrame, endFrame);
-        long duration = audioEndMillis - audioStartMillis;
-        if (duration >= MIDPOINT_MIN_MILLIS) {
-            String secondPeer = remainingPeer(activeSpeaker, speakerPeer);
-            int midpointFrame = frameAtOrAfter(audioStartMillis + duration / 2);
-            scheduleSpeakerSwitch(activeSpeaker, secondPeer, midpointFrame, endFrame);
-            System.out.println("GMIT_GAZE speaker_switch speaker=" + activeSpeaker
-                    + " first_peer=" + speakerPeer + " second_peer=" + secondPeer
-                    + " midpoint_frame=" + midpointFrame
-                    + " midpoint_delta_ms=" + ((long)midpointFrame * FRAME_MILLIS - audioStartMillis));
-        }
+        TimingPlan plan = planTiming(activeSpeaker, speakerPeer, nextSpeaker, audioStartMillis, audioEndMillis, seed, now);
+        for (TimingEvent event : plan.events()) schedule(plan, event);
         speaker = activeSpeaker;
-        long listenerScheduledMillis = listenerFrame < 0 ? -1 : (long)listenerFrame * FRAME_MILLIS;
         System.out.println("GMIT_GAZE scheduled speaker=" + activeSpeaker + " peer=" + speakerPeer
                 + " audio_start_ms=" + audioStartMillis + " audio_end_ms=" + audioEndMillis
-                + " speaker_frame=" + speakerFrame + " listener_frame=" + listenerFrame
-                + " listener_transition_delta_ms=" + (listenerScheduledMillis < 0 ? -1 : listenerScheduledMillis - audioStartMillis));
+                + " seed=" + seed + " listener_frame=" + plan.listenerFrame
+                + " listener_transition_delta_ms=" + (plan.listenerFrame < 0 ? -1 : (long)plan.listenerFrame * FRAME_MILLIS - audioStartMillis)
+                + " next_speaker=" + (nextSpeaker == null ? "unknown" : nextSpeaker)
+                + " handoff_frame=" + plan.handoffFrame + " nod_count=" + plan.nodCount());
+    }
+
+    static TimingPlan planTiming(String activeSpeaker, String speakerPeer, String nextSpeaker,
+                                 long audioStartMillis, long audioEndMillis, long seed, int now) {
+        validateActorId(activeSpeaker, "speaker"); validateActorId(speakerPeer, "speaker peer");
+        if (activeSpeaker.equals(speakerPeer)) throw new IllegalArgumentException("Speaker cannot gaze at self: " + activeSpeaker);
+        if (nextSpeaker != null) { validateActorId(nextSpeaker, "next speaker"); if (nextSpeaker.equals(activeSpeaker)) nextSpeaker = null; }
+        if (audioEndMillis <= audioStartMillis || audioEndMillis - audioStartMillis > 15000)
+            throw new IllegalArgumentException("Gaze requires a bounded audio interval of at most 15 seconds");
+        int speakerFrame = Math.max(now + 1, frameAtOrAfter(audioStartMillis));
+        int listenerFrame = Math.max(now + 1, frameAtOrAfter(audioStartMillis + LISTENER_DELAY_MILLIS));
+        int endFrame = frameAtOrAfter(audioEndMillis);
+        if (listenerFrame >= endFrame) listenerFrame = -1;
+        List<TimingEvent> events = new ArrayList<>();
+        int handoff = -1;
+        String initialTarget = speakerPeer;
+        if (nextSpeaker != null && !nextSpeaker.equals(activeSpeaker)) {
+            int candidate = endFrame - HANDOFF_TRANSITION_FRAMES;
+            if (candidate >= speakerFrame + TRANSITION_FRAMES) handoff = candidate;
+            else initialTarget = nextSpeaker; // Too short to arrive twice: face the actual next speaker immediately.
+        }
+        events.add(TimingEvent.gaze("speaker-start", activeSpeaker, initialTarget, speakerFrame, TRANSITION_FRAMES));
+        if (listenerFrame >= 0) for (String id : ACTORS) if (!id.equals(activeSpeaker))
+            events.add(TimingEvent.gaze("listener-start", id, activeSpeaker, listenerFrame, TRANSITION_FRAMES));
+        String midpointPeer = null;
+        long duration = audioEndMillis - audioStartMillis;
+        if (duration >= MIDPOINT_MIN_MILLIS) {
+            int midpoint = frameAtOrAfter(audioStartMillis + duration / 2);
+            String secondPeer = remainingPeer(activeSpeaker, speakerPeer);
+            boolean endsAtKnownNext = nextSpeaker != null && nextSpeaker.equals(secondPeer);
+            // A known end target wins over an ornamental midpoint switch. If the
+            // midpoint already reaches it, that focus remains through the end.
+            boolean leavesHandoffWindow = handoff < 0 || endsAtKnownNext
+                    || midpoint + MIDPOINT_TRANSITION_FRAMES <= handoff;
+            if (midpoint >= speakerFrame + TRANSITION_FRAMES
+                    && midpoint + MIDPOINT_TRANSITION_FRAMES <= endFrame && leavesHandoffWindow) {
+                midpointPeer = secondPeer;
+                events.add(TimingEvent.gaze("speaker-midpoint", activeSpeaker, secondPeer, midpoint, MIDPOINT_TRANSITION_FRAMES));
+            }
+        }
+        if (handoff >= 0 && nextSpeaker != null && !nextSpeaker.equals(midpointPeer))
+            events.add(TimingEvent.gaze("speaker-handoff", activeSpeaker, nextSpeaker, handoff, HANDOFF_TRANSITION_FRAMES));
+        else if (nextSpeaker != null && nextSpeaker.equals(midpointPeer)) handoff = -1;
+        if (BACKCHANNEL && listenerFrame >= 0) addOneNod(events, activeSpeaker, listenerFrame, handoff < 0 ? endFrame : handoff, seed);
+        return new TimingPlan(speakerFrame, listenerFrame, endFrame, handoff, events);
+    }
+
+    private static void addOneNod(List<TimingEvent> events, String speakerId, int listenerFrame, int latestFrame, long seed) {
+        // Callers commonly derive adjacent per-event seeds. Random's first draw
+        // does not decorrelate those well enough for a visible 50% gate, so mix
+        // the full 64-bit value before using it for every backchannel decision.
+        Random random = new Random(mixSeed(seed));
+        if (!random.nextBoolean()) return; // Deliberately occasional, never a required behavior.
+        List<String> listeners = new ArrayList<>();
+        for (String id : ACTORS) if (!id.equals(speakerId)) listeners.add(id);
+        String listener = listeners.get(random.nextInt(listeners.size()));
+        int earliest = listenerFrame + TRANSITION_FRAMES + NOD_SETTLE_FRAMES;
+        int lastStart = latestFrame - NOD_SETTLE_FRAMES - NOD_DURATION_FRAMES;
+        if (lastStart < earliest) return;
+        int start = earliest + random.nextInt(lastStart - earliest + 1);
+        events.add(TimingEvent.nod(listener, start, NOD_DURATION_FRAMES, NOD_PITCH_RADIANS));
+    }
+
+    /** SplitMix64 finalizer: deterministic avalanche for adjacent external seeds. */
+    private static long mixSeed(long value) {
+        value = (value ^ (value >>> 30)) * 0xbf58476d1ce4e5b9L;
+        value = (value ^ (value >>> 27)) * 0x94d049bb133111ebL;
+        return value ^ (value >>> 31);
+    }
+
+    private static long stableSeed(String speakerId, String peerId, long start, long end) {
+        long result = 531L;
+        result = 31 * result + speakerId.hashCode(); result = 31 * result + peerId.hashCode();
+        result = 31 * result + start; return 31 * result + end;
+    }
+
+    private static void validateActorId(String id, String label) {
+        for (String candidate : ACTORS) if (candidate.equals(id)) return;
+        throw new IllegalArgumentException("Unknown gaze " + label + ": " + id);
     }
 
     private static Actor requireActor(String id, String label) {
@@ -103,54 +201,60 @@ public final class ListenerGaze {
         throw new IllegalArgumentException("No second gaze peer for " + speakerId);
     }
 
-    /** Schedules independent speaker and listener transitions without touching mouth, blink, or seated pose channels. */
-    private static void transition(String activeSpeaker, String speakerPeer, int speakerFrame, int listenerFrame, int endFrame) throws Exception {
-        Actor target = requireActor(activeSpeaker, "speaker");
-        Actor peer = speakerPeer == null ? null : requireActor(speakerPeer, "speaker peer");
-        double[] destination = target.headWorld();
-        for (Actor listener : actors.values()) {
-            double yaw = 0, pitch = 0;
-            int start = listener == target ? speakerFrame : listenerFrame;
-            Actor gazeTarget = listener == target ? peer : target;
-            if (start < 0) continue;
-            if (gazeTarget != null) {
-                double[] origin = listener.headWorld();
-                double[] lookAt = gazeTarget.headWorld();
-                double dx = lookAt[0] - origin[0], dy = lookAt[1] - origin[1], dz = lookAt[2] - origin[2];
-                if (Math.hypot(dx, dz) < 0.2) throw new IllegalStateException("Gaze head targets overlap: " + listener.id);
-                Object body = invoke(listener.avatar, "getCurrentBAPFrame");
-                double rootYaw = ((Number)invoke(body, "getRadianValue", listener.bap("HumanoidRoot_rt_body_turn"))).doubleValue();
-                yaw = Math.atan2(dx, dz) - rootYaw;
-                yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
-                pitch = -Math.atan2(dy, Math.hypot(dx, dz));
-            }
-            double headYaw = HEAD ? clamp(yaw * 0.8, 65) : 0;
-            double headPitch = HEAD ? clamp(pitch * 0.7, 20) : 0;
-            double eyeYaw = EYES ? clamp(yaw - headYaw, 25) : 0;
-            double eyePitch = EYES ? clamp(pitch - headPitch, 15) : 0;
-            // Interpolate from the preceding frame so the first nonzero movement
-            // is at the requested frame, not one extra 40 ms frame later.
-            listener.shift(start - 1, new double[] {headYaw, headPitch, eyeYaw, eyePitch});
-            listener.publishTransition(start - 1, Math.max(start + 23, endFrame));
-            GazeModiffAdapter.scheduleTarget(listener.id, gazeTarget == null ? null : gazeTarget.id, start);
-            System.out.println("GMIT_GAZE target actor=" + listener.id + " speaker=" + activeSpeaker
-                    + " role=" + (listener == target ? "speaker" : "listener")
-                    + " node=" + invoke((gazeTarget == null ? target : gazeTarget).head, "getIdentifier") + " world=" + vector(gazeTarget == null ? destination : gazeTarget.headWorld())
-                    + " transition_frame=" + start
-                    + " local_yaw_deg=" + Math.toDegrees(yaw) + " local_pitch_deg=" + Math.toDegrees(pitch)
-                    + " head_yaw_deg=" + Math.toDegrees(headYaw) + " eye_yaw_deg=" + Math.toDegrees(eyeYaw));
+    /** Executes one already validated plan event without introducing a second pose owner. */
+    private static void schedule(TimingPlan plan, TimingEvent event) throws Exception {
+        Actor actor = requireActor(event.actor, event.kind);
+        if (event.nod) {
+            actor.nod(event.start, event.duration, event.pitch);
+            actor.publishTransition(event.start - 1, plan.endFrame);
+            System.out.println("GMIT_GAZE backchannel actor=" + event.actor + " kind=nod"
+                    + " start_frame=" + event.start + " end_frame=" + (event.start + event.duration)
+                    + " pitch_deg=" + Math.toDegrees(event.pitch));
+            return;
+        }
+        Actor target = requireActor(event.target, event.kind + " target");
+        actor.shift(event.start - 1, gazeAngles(actor, target), event.duration);
+        actor.publishTransition(event.start - 1, plan.endFrame);
+        GazeModiffAdapter.scheduleTarget(event.actor, event.target, event.start);
+        System.out.println("GMIT_GAZE target actor=" + event.actor + " kind=" + event.kind
+                + " target=" + event.target + " transition_frame=" + event.start
+                + " duration_frames=" + event.duration
+                + " handoff=" + event.kind.equals("speaker-handoff"));
+    }
+
+    /** Immutable deterministic scheduling result for headless timing regression checks. */
+    static final class TimingPlan {
+        final int speakerFrame, listenerFrame, endFrame, handoffFrame;
+        private final List<TimingEvent> events;
+        TimingPlan(int speakerFrame, int listenerFrame, int endFrame, int handoffFrame, List<TimingEvent> events) {
+            this.speakerFrame = speakerFrame; this.listenerFrame = listenerFrame;
+            this.endFrame = endFrame; this.handoffFrame = handoffFrame;
+            this.events = Collections.unmodifiableList(new ArrayList<>(events));
+        }
+        List<TimingEvent> events() { return events; }
+        int nodCount() { int count = 0; for (TimingEvent event : events) if (event.nod) count++; return count; }
+        String speakerFinalTarget(String speakerId) {
+            String target = null;
+            for (TimingEvent event : events) if (!event.nod && speakerId.equals(event.actor)) target = event.target;
+            return target;
         }
     }
 
-    /** A future speaker-only overlay replaces only that speaker's queued gaze masks. */
-    private static void scheduleSpeakerSwitch(String speakerId, String peerId, int midpointFrame, int endFrame) throws Exception {
-        Actor speakerActor = requireActor(speakerId, "speaker");
-        Actor peer = requireActor(peerId, "speaker peer");
-        if (speakerActor == peer || midpointFrame >= endFrame) return;
-        // The preceding-frame origin makes the first nonzero value occur at midpointFrame.
-        speakerActor.shift(midpointFrame - 1, gazeAngles(speakerActor, peer), MIDPOINT_TRANSITION_FRAMES);
-        speakerActor.publishTransition(midpointFrame - 1, endFrame);
-        GazeModiffAdapter.scheduleTarget(speakerId, peerId, midpointFrame);
+    static final class TimingEvent {
+        final String kind, actor, target;
+        final int start, duration;
+        final boolean nod;
+        final double pitch;
+        private TimingEvent(String kind, String actor, String target, int start, int duration, boolean nod, double pitch) {
+            this.kind = kind; this.actor = actor; this.target = target; this.start = start;
+            this.duration = duration; this.nod = nod; this.pitch = pitch;
+        }
+        static TimingEvent gaze(String kind, String actor, String target, int start, int duration) {
+            return new TimingEvent(kind, actor, target, start, duration, false, 0);
+        }
+        static TimingEvent nod(String actor, int start, int duration, double pitch) {
+            return new TimingEvent("listener-nod", actor, null, start, duration, true, pitch);
+        }
     }
 
     private static double[] gazeAngles(Actor viewer, Actor gazeTarget) throws Exception {
@@ -174,7 +278,7 @@ public final class ListenerGaze {
     public static void applyBody(String actorId, Object frame) throws Exception {
         Actor actor = actors.get(actorId);
         if (actor == null || !HEAD) return;
-        double[] angles = actor.at(((Number)invoke(frame, "getFrameNumber")).intValue());
+        double[] angles = actor.bodyAngles(((Number)invoke(frame, "getFrameNumber")).intValue());
         for (int joint = 1; joint <= 7; joint++) {
             invoke(frame, "setRadianValue", actor.bap("vc" + joint + "_torsion"), angles[0] / 7);
             invoke(frame, "setRadianValue", actor.bap("vc" + joint + "_tilt"), angles[1] / 7);
@@ -193,7 +297,7 @@ public final class ListenerGaze {
         for (Actor actor : actors.values()) {
             int phaseStart = actor.phaseStartAt(now);
             if (phaseStart < 0 || now < phaseStart + 30) continue;
-            double[] expected = actor.at(now);
+            double[] expected = actor.bodyAngles(now);
             Object body = invoke(actor.avatar, "getCurrentBAPFrame");
             Object face = invoke(actor.avatar, "getCurrentFAPFrame");
             double yaw = 0, pitch = 0;
@@ -226,8 +330,6 @@ public final class ListenerGaze {
         if (Math.abs(actual - expected) > Math.toRadians(3)) throw new IllegalStateException("Gaze " + channel + " changed for " + actor + ": " + actual + " expected " + expected);
     }
     private static double clamp(double value, double degrees) { double bound = Math.toRadians(degrees); return Math.max(-bound, Math.min(bound, value)); }
-    private static String vector(double[] value) { return value[0] + "," + value[1] + "," + value[2]; }
-
     private static final class Actor {
         final String id;
         final Object avatar, blender, head;
@@ -236,6 +338,7 @@ public final class ListenerGaze {
         volatile int start;
         int verifiedStart = -1;
         private final List<Transition> transitions = new ArrayList<>();
+        private final List<Nod> nods = new ArrayList<>();
 
         Actor(String id, Object avatar, Object blender) throws Exception {
             if (avatar == null || blender == null) throw new IllegalStateException("Missing gaze actor chain: " + id);
@@ -286,6 +389,15 @@ public final class ListenerGaze {
             if (selected == null) return new double[4];
             return selected.at(frame);
         }
+        synchronized void nod(int start, int durationFrames, double pitch) {
+            if (durationFrames <= 0 || !Double.isFinite(pitch)) throw new IllegalArgumentException("Invalid nod timing or pitch");
+            nods.add(new Nod(start, durationFrames, pitch));
+        }
+        synchronized double[] bodyAngles(int frame) {
+            double[] result = at(frame);
+            for (Nod nod : nods) result[1] += nod.at(frame);
+            return result;
+        }
         private static final class Transition {
             final int start, durationFrames;
             final double[] from, to;
@@ -296,6 +408,15 @@ public final class ListenerGaze {
             double[] result = new double[4];
             for (int i = 0; i < result.length; i++) result[i] = from[i] + (to[i] - from[i]) * t;
             return result;
+            }
+        }
+        private static final class Nod {
+            final int start, durationFrames;
+            final double pitch;
+            Nod(int start, int durationFrames, double pitch) { this.start = start; this.durationFrames = durationFrames; this.pitch = pitch; }
+            double at(int frame) {
+                double t = (frame - start) / (double)durationFrames;
+                return t <= 0 || t >= 1 ? 0 : pitch * Math.sin(Math.PI * t);
             }
         }
         Object face(Object source) throws Exception {

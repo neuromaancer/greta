@@ -108,8 +108,10 @@ public final class MeaningMinerBridge {
                 String expectedHash = textHash(text), actualHash = textHash(actualSpeech);
                 if (!expectedHash.equals(actualHash)) throw new IOException("MeaningMiner changed speech text for " + key + " expected_sha256=" + expectedHash + " actual_sha256=" + actualHash);
                 auditIntentions(actor, eventId, intentions, expectedHash);
+                Admission admission = admitIntentions(actor, intentions);
+                auditAdmission(actor, eventId, admission);
                 List<String> types = imageSchemaTypes(intentions);
-                PREPARED.put(key, new PreparedTurn(actor, eventId, text, intentions, types, expectedHash));
+                PREPARED.put(key, new PreparedTurn(actor, eventId, text, admission, types, expectedHash));
                 restoreDebug();
                 System.out.println("GMIT_MEANING_MINER prepared actor=" + actor + " event_id=" + eventId + " schemas=" + types);
                 return types;
@@ -136,7 +138,7 @@ public final class MeaningMinerBridge {
                 Class<?> composition = Class.forName("greta.core.util.enums.CompositionType", true, state.loader);
                 Object blend = composition.getField("blend").get(null);
                 Object mode = modeType.getConstructor(composition).newInstance(blend);
-                state.performIntentions.invoke(state.planner, turn.intentions, id, mode);
+                state.performIntentions.invoke(state.planner, turn.admittedIntentions, id, mode);
                 if (!turn.forwarded || turn.speechSignals != 1 || turn.realizerCalls != 1)
                     throw new IOException("MeaningMiner did not produce exactly one routed speech signal for " + key(actor, eventId));
                 turn.dispatched = true;
@@ -444,6 +446,10 @@ public final class MeaningMinerBridge {
     private static String stringMethod(Object value, String method) {
         try { Object result = value.getClass().getMethod(method).invoke(value); return String.valueOf(result); } catch (Exception ignored) { return ""; }
     }
+    private static String requiredStringMethod(Object value, String method) throws Exception {
+        Object result = value.getClass().getMethod(method).invoke(value);
+        return result == null ? "" : String.valueOf(result).trim();
+    }
     private static String speechText(List<Object> intentions) throws Exception {
         for (Object value : intentions) if (value.getClass().getName().endsWith("PseudoIntentionSpeech")) {
             StringBuilder out = new StringBuilder(); flatten(value.getClass().getMethod("getSpeechElements").invoke(value), out); return out.toString();
@@ -468,6 +474,82 @@ public final class MeaningMinerBridge {
     private static List<Object> intentions(Object raw) throws IOException {
         if (!(raw instanceof Iterable<?>)) throw new IOException("MeaningMiner did not return an intention list");
         List<Object> result = new ArrayList<Object>(); for (Object value : (Iterable<?>) raw) result.add(value); return result;
+    }
+    /**
+     * Applies an optional semantic admission policy before Planner mutates its
+     * input list.  The extracted list itself is retained unchanged for audit.
+     */
+    static List<Object> admittedIntentions(String actor, List<Object> values) throws Exception {
+        return admitIntentions(actor, values).admittedIntentions;
+    }
+    private static Admission admitIntentions(String actor, List<Object> values) throws Exception {
+        String mode = admissionMode(actor);
+        List<Object> raw = Collections.unmodifiableList(new ArrayList<Object>(values));
+        if ("all".equals(mode)) return new Admission(mode, raw, new ArrayList<Object>(raw), Collections.<String>emptyList(), Collections.<String>emptyList(), "disabled");
+
+        Set<String> schemaIds = new LinkedHashSet<String>();
+        Set<String> anchors = new LinkedHashSet<String>();
+        boolean hasIdeationalUnit = false;
+        boolean invalid = false;
+        for (Object value : raw) {
+            String name = requiredStringMethod(value, "getName");
+            if ("imageschema".equalsIgnoreCase(name)) {
+                String id = requiredStringMethod(value, "getId");
+                if (id.isEmpty()) invalid = true;
+                else schemaIds.add(id);
+            } else if ("ideationalunit".equalsIgnoreCase(name)) {
+                hasIdeationalUnit = true;
+                String main;
+                try { main = requiredStringMethod(value, "getMainIntentionId"); }
+                catch (NoSuchMethodException error) { invalid = true; continue; }
+                if (main.isEmpty()) invalid = true;
+                else anchors.add(main);
+            }
+        }
+        for (String anchor : anchors) if (!schemaIds.contains(anchor)) invalid = true;
+        if (!schemaIds.isEmpty() && (!hasIdeationalUnit || anchors.isEmpty())) invalid = true;
+        if (invalid) return new Admission(mode, raw, new ArrayList<Object>(raw), new ArrayList<String>(anchors), new ArrayList<String>(schemaIds), "invalid-main-anchor");
+
+        List<Object> admitted = new ArrayList<Object>();
+        List<String> admittedIds = new ArrayList<String>();
+        for (Object value : raw) {
+            String name = requiredStringMethod(value, "getName");
+            if (!"imageschema".equalsIgnoreCase(name)) { admitted.add(value); continue; }
+            String id = requiredStringMethod(value, "getId");
+            if (anchors.contains(id)) { admitted.add(value); admittedIds.add(id); }
+        }
+        return new Admission(mode, raw, admitted, new ArrayList<String>(anchors), admittedIds, "main-anchors");
+    }
+    private static String admissionMode(String actor) throws Exception {
+        String actorValue = System.getProperty("gmit.meaningminer.gesture.admission." + actor);
+        if (actorValue != null) return parseAdmissionMode(actorValue, "system property for " + actor);
+        String globalValue = System.getProperty("gmit.meaningminer.gesture.admission");
+        if (globalValue != null) return parseAdmissionMode(globalValue, "system property");
+        try {
+            Class<?> scene = Class.forName("SeatedScene");
+            Object configured = scene.getMethod("meaningGestureAdmission", String.class).invoke(null, actor);
+            return parseAdmissionMode(configured == null ? "" : String.valueOf(configured), "SeatedScene for " + actor);
+        } catch (ClassNotFoundException absent) {
+            return "all";
+        } catch (InvocationTargetException error) {
+            throw asException(unwrap(error));
+        }
+    }
+    private static String parseAdmissionMode(String value, String source) {
+        String mode = value.trim().toLowerCase(Locale.ROOT);
+        if ("all".equals(mode) || "ideational-main".equals(mode)) return mode;
+        throw new IllegalArgumentException("Unsupported MeaningMiner gesture admission mode from " + source + ": " + value);
+    }
+    private static void auditAdmission(String actor, String eventId, Admission admission) throws Exception {
+        List<String> raw = new ArrayList<String>();
+        for (Object value : admission.rawIntentions) {
+            if ("imageschema".equalsIgnoreCase(requiredStringMethod(value, "getName"))) raw.add(requiredStringMethod(value, "getId"));
+        }
+        System.out.println("GMIT_MEANING_MINER admission actor=" + actor + " event_id=" + eventId
+                + " mode=" + admission.mode + " reason=" + admission.reason
+                + " raw_schema_ids=" + raw + " main_anchors=" + admission.mainAnchors
+                + " admitted_schema_ids=" + admission.admittedSchemaIds
+                + " raw_intentions=" + admission.rawIntentions.size() + " admitted_intentions=" + admission.admittedIntentions.size());
     }
     private static int countSpeech(List<Object> intentions) { int count = 0; for (Object value : intentions) if (value.getClass().getName().endsWith("PseudoIntentionSpeech")) count++; return count; }
     private static int markerCount(String markup) { int count = 0, offset = 0; while ((offset = markup.indexOf("<tm id=", offset)) >= 0) { count++; offset += 7; } return count; }
@@ -721,11 +803,27 @@ public final class MeaningMinerBridge {
             this.actor = actor; this.loader = loader; this.planner = planner; this.realizer = realizer; this.extractor = extractor; this.process = process;
         }
     }
+    private static final class Admission {
+        final String mode, reason;
+        final List<Object> rawIntentions, admittedIntentions;
+        final List<String> mainAnchors, admittedSchemaIds;
+        Admission(String mode, List<Object> rawIntentions, List<Object> admittedIntentions,
+                List<String> mainAnchors, List<String> admittedSchemaIds, String reason) {
+            this.mode = mode; this.reason = reason;
+            this.rawIntentions = rawIntentions;
+            this.admittedIntentions = admittedIntentions;
+            this.mainAnchors = Collections.unmodifiableList(new ArrayList<String>(mainAnchors));
+            this.admittedSchemaIds = Collections.unmodifiableList(new ArrayList<String>(admittedSchemaIds));
+        }
+    }
     private static final class PreparedTurn {
-        final String actor, eventId, text; final List<Object> intentions; final List<String> schemaTypes; final List<String> gestureSignals = new ArrayList<String>();
+        final String actor, eventId, text; final List<Object> rawIntentions, admittedIntentions; final List<String> schemaTypes; final List<String> gestureSignals = new ArrayList<String>();
         boolean dispatched, forwarded; int speechSignals, realizerCalls;
-        PreparedTurn(String actor, String eventId, String text, List<Object> intentions, List<String> schemaTypes, String ignoredSpeechHash) {
-            this.actor = actor; this.eventId = eventId; this.text = text; this.intentions = intentions; this.schemaTypes = Collections.unmodifiableList(new ArrayList<String>(schemaTypes));
+        PreparedTurn(String actor, String eventId, String text, Admission admission, List<String> schemaTypes, String ignoredSpeechHash) {
+            this.actor = actor; this.eventId = eventId; this.text = text;
+            this.rawIntentions = admission.rawIntentions;
+            this.admittedIntentions = admission.admittedIntentions;
+            this.schemaTypes = Collections.unmodifiableList(new ArrayList<String>(schemaTypes));
         }
     }
 }

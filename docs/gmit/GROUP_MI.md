@@ -179,12 +179,16 @@ generated sitting transition, or contact-aware hand/arm animation.
 `ListenerGaze.java` updates the two listeners when the speaker changes. It binds
 to the existing avatars' rendered head nodes, accounts for seated root BAP
 translation and yaw, and smooths bounded head/eye turns over 18 Greta frames
-(0.72 seconds at 25 fps). The current speaker returns to the forward seated pose.
+(0.72 seconds at 25 fps). The current speaker looks at a valid peer and the next
+speaker takes priority at utterance end. The final head transition is scheduled
+inside the audio interval so it finishes as speech ends. Listener turns remain
+scheduled from the actual Audio start plus 200 ms. A deterministic seed controls
+an optional single listener nod per turn (50% probability, 4-degree pitch).
 Only cervical yaw/pitch and four eyeball FAP channels are controlled. LipBlender
 output is cloned before those eye channels change; mouth and eyelid masks remain
 intact. Finite gaze-only frames also move idle listeners without requiring speech.
-Gaze has priority over concurrent cervical gestures; independent nod/gesture
-composition is not verified.
+Gaze has priority over concurrent cervical gestures; the nod is a bounded
+gaze-layer feature rather than evidence for arbitrary nod/gesture composition.
 
 Use `-DisableListenerGaze` or `-DisableTabletopArms` with the PowerShell launcher
 to isolate the behaviors. In NetBeans, add `-Dgmit.gaze.enabled=false` or
@@ -193,6 +197,12 @@ to isolate the behaviors. In NetBeans, add `-Dgmit.gaze.enabled=false` or
 channels. Existing speech, captions, actor mapping, and transcript order are
 independent of these switches. The silent `-GroupMI -Preview` also captures all
 three speaker-target states before exiting.
+
+Use `-DisableListenerNods` to disable optional nods. In an IDE launch, use
+`-Dgmit.gaze.backchannel=false`; `-Dgmit.gaze.seed=<integer>` makes the bounded
+per-turn choice reproducible. Current November 7 runtime evidence is recorded in
+[MEANING_MINER.md](MEANING_MINER.md); it is separate from the dated human
+acceptance records below.
 
 ## Deployment and evidence
 

@@ -115,7 +115,7 @@ final class GMITLauncher {
             List<String> command = new ArrayList<>();
             command.add(java.toString());
             command.add("-Djava.library.path=" + bin.resolve("Player/Lib/External/Win64"));
-            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.pose.arms", "gmit.modiff.dir", "gmit.meaningminer.enabled", "gmit.meaningminer.handSafety", "gmit.audio.muted")) {
+            for (String property : Arrays.asList("gmit.gaze.enabled", "gmit.gaze.head", "gmit.gaze.eyes", "gmit.gaze.backchannel", "gmit.gaze.seed", "gmit.pose.arms", "gmit.modiff.dir", "gmit.meaningminer.enabled", "gmit.meaningminer.handSafety", "gmit.meaningminer.seated_arm_gain", "gmit.meaningminer.gesture.admission", "gmit.meaningminer.gesture.admission.facilitator", "gmit.meaningminer.gesture.admission.patient-a", "gmit.meaningminer.gesture.admission.patient-b", "gmit.audio.muted")) {
                 if (System.getProperty(property) != null) command.add("-D" + property + "=" + System.getProperty(property));
             }
             // Keep the IDE's actual source-build classpath. Do not replace it with

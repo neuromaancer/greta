@@ -1,13 +1,13 @@
 # GMIT in Greta
 
-Updated 2026-11-02. P0 inspection and synthetic P1 acceptance are complete.
+Updated 2026-11-07. P0 inspection and synthetic P1 acceptance are complete.
 The authored group MI extension adds a 13-turn conversation about reducing
 red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
 for launch commands, NetBeans settings, and evidence.
-The seated scene also supports per-avatar clasped-hand poses and listener gaze;
-their separate calibration and acceptance records are in the same document.
-The arm pose now uses lower elbows and moves each clasp together along
-the tabletop; the 2026-10-30 calibration and verification are recorded there.
+The seated scene also supports per-avatar tabletop rests and listener gaze;
+their calibration and acceptance records are in the same document. Current
+rests use close, wide, and asymmetric palms-down placement. The earlier
+2026-10-30 clasp calibration remains a historical record.
 The user subsequently authorized committing and pushing these development files
 to `feat/gmit-multiparty`. Initial P0/P1 work did not run an LLM. The later local
 Pure and offline-import extension is described in [REPLAY.md](REPLAY.md): one
@@ -27,7 +27,7 @@ for the input approximations, startup, and verification limits.
 The opt-in [MeaningMiner extension](MEANING_MINER.md) sends each of the three
 actors' English semantic intentions through its own Planner and gesture lexicon.
 It preserves the single speech route, realizes original library arm/finger
-motions, and blends back to the calibrated seated clasp. Ordinary replay leaves
+motions, and blends back to the calibrated actor rest. Ordinary replay leaves
 it disabled; Pure/RL decisions are unaffected. Its verification record separates
 library availability, actual selected gestures, and human visual acceptance.
 The initial cross-hand-only guard was rejected in human review on 2026-11-03 and
@@ -46,6 +46,32 @@ styles, and normal remaining behavior. The maximum measured queue batch across
 these checks was 315 ms, so this is not a 25 fps guarantee or universal mesh
 collision proof. See the
 same record for geometry limits, deployment receipts, and final observations.
+
+The current November 7 source revision narrows MeaningMiner activation before
+Planner through each seat's `gesture_admission="ideational-main"` policy, while
+preserving raw extraction for audit and failing open when an ideational main
+anchor is unresolved. Gesture amplitude uses a 0.24 base seated gain and updated
+balanced/reserved/animated profiles. The calibrated rests now use close centered
+facilitator palms, wider patient-A palms, and asymmetric patient-B palms;
+their workspace offsets and body/table clearance policy were recalibrated.
+The return uses a 160 ms finishing hold plus a continuous 2.4 s minimum-jerk
+settling motion, with full collision checks and exact-rest verification.
+Palm/finger tabletop padding tapers near the calibrated contact pose while
+retaining the physical boundary. Collision offsets are released by safe subsets
+at no more than one degree per joint per frame, avoiding repeated coarse resets.
+Listener gaze retains simultaneous Audio-start-plus-200-ms turns,
+while the actual next speaker takes priority at the handoff; a seeded 50% optional
+single-listener 4-degree nod is independently switchable. The deployed audible
+replay completed seven turns with nine selected gestures, 1,402 passing projected
+frames, seven restorations, and three exclusive listener nods. MODIFF brow output
+remained active, and legacy scratch files were restored. The user accepted the
+overall conversational behavior, then the forward hand placement, tabletop
+contact, and final natural return without visible jitter. The final audible run
+observed 483 BAP samples and a largest queue batch of 41 ms; this is not a
+continuous-collision or 25 fps guarantee. The November 3 observations above are
+historical. The current session changes eight runtime paths through the existing
+sixteen-file allowlist. Its receipt sequence and reverse-order recovery commands
+are recorded in [MEANING_MINER.md](MEANING_MINER.md#verification-record).
 
 ## Baseline and ownership
 
@@ -165,6 +191,10 @@ file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,
 deployment tooling and this document remain in the development checkout.
+The current source change set affects seven existing mappings only:
+`MeaningMinerBridge.java`, `MeaningGesture.java`, `SmokeProbe.java`,
+`SeatedScene.java`, `ListenerGaze.java`, `Start-GMIT.ps1`, and the group-MI room
+XML. The allowlist itself is unchanged.
 
 From the greta WSL root:
 

@@ -153,7 +153,12 @@ combine a speech intention with a second input speech signal. Preserve all
 selected semantic gestures, including both hands, rather than selecting one
 sorted schema or substituting an authored gesture template. SeatedScene captures
 the actual arm/finger BAP output, preserves its timing, and blends back to the
-calibrated clasp. Root/legs, gaze, lips, blink, and optional MODIFF brows retain
+actor's calibrated rest. The authorized lower-activity setting uses each genuine
+ideational unit's main image schema before Planner; retain the complete raw
+extraction for audit and all selected bimanual outputs afterward. Missing or
+unresolvable main anchors fall back explicitly to all extracted intentions.
+This is semantic admission, not a confidence threshold. Root/legs, gaze, lips,
+blink, and optional MODIFF brows retain
 their existing owners; standing-body signals must not override the seated scene.
 Empty semantic output means speech without an invented gesture. Preserve legacy
 parser/Planner scratch files, including after an owned child timeout. Ordinary
@@ -179,15 +184,43 @@ and their per-frame changes within 6 degrees, including untouched sparse-seed
 axes. Preserve full stock wrist/finger targets
 after the 18-frame entry envelope, original raw frame numbers, and other
 behavior owners. Use the configured `gesture_release_lead` for coordinated
-finger release/workspace entry, and join its verified pose before reversing the nine-frame opening
-path into the clasp. The calibrated contact and air-gap thresholds are separate
-for finger-to-palm and the other proxies. Offline checks must include exactly
+finger release/workspace entry. The current separated rests use
+`gesture_return="direct"`: a 160 ms finishing hold followed by one continuous
+2.4 second minimum-jerk return from the final semantic pose to rest. Require
+normal cross-hand and finger-palm air gaps at rest; keep full air gaps and the
+normal per-frame projection during return. Its final zero-weight restored frame
+must reach the exact base within correction rate limits and sampled-path checks,
+or fail closed. Preserve the preceding safe corrective offset and release it by
+at most one degree per joint per frame; if full release is unsafe, choose a
+checked subset of the nonzero correction axes that makes progress toward zero.
+Refine new coarse corrections toward
+the previous offset while retaining every safety check. The exact-rest frame
+must satisfy the same smaller release bound, rather than hiding a final snap.
+Validate actual projected return trajectories for oscillation, not only nominal
+easing or static endpoints. The legacy `workspace` return remains available for contact
+rests with its original 24-frame timing and 12-frame approach: join the verified
+workspace before reversing the exact cached opening poses and matching clearance
+weights. Do not interpolate new contact poses between those samples.
+Nominal easing does not establish monotone
+motion after safety projection. The calibrated contact and air-gap thresholds are
+separate for finger-to-palm and the other proxies. For an already separated
+rest, cap its contact threshold at the normal requested air gap rather than
+requiring the entire resting hand separation during gestures. Offline checks must include exactly
 the runtime's 74 arm/hand channels, including every finger pivot and twist.
 Unresolved projections fail rather than silently dropping a selected
 gesture. `-DisableHandSafety` isolates geometry correction; ordinary playback
 still leaves MeaningMiner disabled. Capsule checks are not mesh collision proof.
 Keep geometry snapshots, pose traces, and replay diagnostics under local ignored
 output; never accept arbitrary serialized snapshots as runtime input.
+The authorized `tabletop_contact` extension distinguishes a calibrated resting
+hand from a moving gesture. For palm/finger table checks only, taper the extra
+table padding from zero at the calibrated rest to the normal value when any
+palm landmark moves 30 mm. Evaluate the envelope from actual candidate geometry,
+including every sampled transition. Keep the physical table plane, capsule radii,
+cross-hand/body guards, and full forearm/upper-arm table padding unchanged; never
+permit negative physical surface clearance. This is a local support envelope,
+not a general contact or mesh simulation. It requires separated direct-return
+rests; default room configurations retain constant table padding.
 The seat's `gesture_style` selects balanced/reserved/animated expressivity before
 Realizer and left/right proximal gains afterward. Preserve selected gesture
 references and word-marker links; style labels are not GMIT patient personas.
@@ -267,9 +300,11 @@ scaling lowers the cushion while retaining the floor origin; do not move seated
 avatars to repair chair contact because that also moves the calibrated hands.
 Optional `arm-joint` children on each `seat` supply explicit arm/hand/finger BAP
 angles in degrees. Keep the allowlist limited to arms and hands; root, spine,
-neck, face, and eyelid channels are not valid overrides. The fixed clasp pose
+neck, face, and eyelid channels are not valid overrides. The per-actor rest pose
 owns the arm channels while enabled and is calibrated for these three avatars,
-not a general hand-contact or collision solver. `-DisableTabletopArms` also
+not a general hand-contact or collision solver. Current rests are close,
+centered palms down for the facilitator, wider palms down for patient A, and asymmetric palms down
+for patient B. `-DisableTabletopArms` also
 disables the finger overrides. Inspect close-up renders after hand-pose edits.
 Do not replace the active Environment root, double-apply seat coordinates to
 both the Environment parent and BAP root, or let speech reset the seated legs.
@@ -288,16 +323,23 @@ LipBlender. Preserve jaw, lips, eyelids, seated limbs, and root placement.
 Idle listeners need finite gaze-only frames because they may emit no body frames.
 During replay, the speaker looks at a valid peer; for utterances of at least
 3.5 seconds, the speaker switches to the other peer at the midpoint with a
-28-frame smooth transition. Schedule listener motion from the actual Greta Audio
+28-frame smooth transition when it fits. Looking at the actual next speaker at
+utterance end takes priority; reserve an 18-frame final transition and omit a
+conflicting midpoint switch. Do not invent a next speaker on the last turn or
+same-actor chunk continuation. Schedule listener motion from the actual Greta Audio
 start timestamp plus 200 ms, rounded up to the next 25 fps frame. The configured
 turn gap keeps the preceding utterance finished before the new transition.
 Do not schedule from BML dispatch: TTS latency is variable. Preserve the gaze
 timeline for prequeued speech frames and cover the bounded audio interval with
 neck/eye-only masks so older queued frames cannot restore the previous gaze.
-Gaze owns the cervical channels while enabled; independent nod/gesture blending
-is not established. Use `-DisableListenerGaze` or `-DisableTabletopArms` for
+Gaze owns the cervical channels while enabled and composes a small listener nod
+into pitch. Seeded backchannels have a 50% per-turn chance, at most one listener
+nod per turn, after the initial gaze settles and before handoff/end. The two
+listeners may turn toward the speaker simultaneously; only nods are exclusive.
+Use `-DisableListenerNods`, `-DisableListenerGaze`, or `-DisableTabletopArms` for
 isolation. The NetBeans child forwards `gmit.gaze.enabled`, `gmit.gaze.head`,
-`gmit.gaze.eyes`, and `gmit.pose.arms` JVM properties.
+`gmit.gaze.eyes`, `gmit.gaze.backchannel`, `gmit.gaze.seed`, and `gmit.pose.arms`
+JVM properties.
 
 The global IniManager loads `./Greta.ini` from the runtime working directory.
 The current graph does not need an additional Ini Manager UI node: its explicit

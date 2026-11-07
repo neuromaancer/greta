@@ -362,7 +362,8 @@ public final class SmokeProbe {
         }
     }
     private static void playTurn(int ordinal, int total, String actor, String readerId, File bml,
-                                 Map<String, Integer> expected, int turnGap, Caption caption, Turn scenarioTurn) throws Exception {
+                                 Map<String, Integer> expected, int turnGap, Caption caption, Turn scenarioTurn,
+                                 String nextSpeaker) throws Exception {
         assertAudioCounts(expected);
         if (caption != null) caption.checkCancelled();
         if (caption != null) caption.show(ordinal, total, scenarioTurn, activeProvenance);
@@ -392,7 +393,9 @@ public final class SmokeProbe {
         long start = ((Number)call(a,"getTimeMillis")).longValue();
         long end = ((Number)call(a,"getEndMillis")).longValue();
         String gazePeer = gazePeer(actor, ordinal);
-        ListenerGaze.scheduleSpeech(actor, gazePeer, start, end);
+        long gazeSeed = Long.getLong("gmit.gaze.seed", 711L).longValue()
+                ^ (scenarioTurn == null ? ordinal : scenarioTurn.eventId.hashCode());
+        ListenerGaze.scheduleSpeech(actor, gazePeer, nextSpeaker, start, end, gazeSeed);
         if (meaningTurn) SeatedScene.bindMeaningTurn(actor, scenarioTurn.eventId, start, end);
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         long engineNow = ((Number)clock.invoke(null)).longValue();
@@ -401,6 +404,7 @@ public final class SmokeProbe {
         long stop = System.currentTimeMillis()+remaining+turnGap*1000L+7000;
         int frame = 0;
         boolean capturedSpeakerShift = false;
+        boolean capturedHandoff = false;
         int meaningCapture = 0;
         while (true) {
             long restoreEnd = meaningTurn ? SeatedScene.meaningRestoreMillis(actor, scenarioTurn.eventId) : 0;
@@ -423,6 +427,11 @@ public final class SmokeProbe {
                     && ((Number)clock.invoke(null)).longValue() >= start + duration / 2 + 1300) {
                 capture(String.format("speaker-shift-%03d-%s", ordinal, actor));
                 capturedSpeakerShift = true;
+            }
+            if (nextSpeaker != null && !nextSpeaker.equals(actor) && !capturedHandoff
+                    && ((Number)clock.invoke(null)).longValue() >= end + 160) {
+                capture(String.format("handoff-%03d-%s-to-%s", ordinal, actor, nextSpeaker));
+                capturedHandoff = true;
             }
             sampleFaces(ordinal,actor); Thread.sleep(100);
         }
@@ -585,7 +594,9 @@ public final class SmokeProbe {
                 for (int i = 0; i < turns.length; i++) {
                     String turn = turns[i];
                     String actor = turn.startsWith("facilitator") ? "facilitator" : turn;
-                    playTurn(i + 1, turns.length, actor, "gmit-" + turn + "-reader", new File("./Examples/GMIT/" + turn + ".xml"), expected, turnGap, null, null);
+                    String next = i + 1 < turns.length ? turns[i + 1] : null;
+                    if (next != null && next.startsWith("facilitator")) next = "facilitator";
+                    playTurn(i + 1, turns.length, actor, "gmit-" + turn + "-reader", new File("./Examples/GMIT/" + turn + ".xml"), expected, turnGap, null, null, next);
                 }
                 if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);
                 assertAudioCounts(expected);
@@ -596,7 +607,8 @@ public final class SmokeProbe {
                     Turn turn = scenario.turns.get(i);
                     if (order.length() > 0) order.append(',');
                     order.append(turn.actor);
-                    playTurn(i + 1, scenario.turns.size(), turn.actor, readerFor(turn.actor), writeBml(turn), expected, turnGap, caption, turn);
+                    String next = i + 1 < scenario.turns.size() ? scenario.turns.get(i + 1).actor : null;
+                    playTurn(i + 1, scenario.turns.size(), turn.actor, readerFor(turn.actor), writeBml(turn), expected, turnGap, caption, turn, next);
                 }
                 scenarioOrder = order.toString();
                 if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);

@@ -1,6 +1,6 @@
 param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
-    [switch]$DisableListenerGaze, [switch]$DisableTabletopArms,
+    [switch]$DisableListenerGaze, [switch]$DisableListenerNods, [switch]$DisableTabletopArms,
     [switch]$MeaningMiner, [switch]$DisableHandSafety,
     [switch]$Muted,
     [string]$ModiffDirectory,
@@ -115,6 +115,7 @@ try {
         $arguments = @('-cp', ('"' + $run + ';Modular.jar"'), 'SmokeProbe', ('"' + $config + '"'), ('"' + $run + '"'), "$StartDelaySeconds", "$TurnGapSeconds", "$EndHoldSeconds")
         if ($Preview) { $arguments = @('-Dgmit.preview=true') + $arguments }
         if ($DisableListenerGaze) { $arguments = @('-Dgmit.gaze.enabled=false') + $arguments }
+        if ($DisableListenerNods) { $arguments = @('-Dgmit.gaze.backchannel=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
         if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }

@@ -9,10 +9,12 @@ import java.util.TreeMap;
 public final class MeaningGesture {
     static final int FRAME_MILLIS = 40;
     static final int BLEND_FRAMES = 18;
-    static final int RETURN_FRAMES = 24; // Ordered release, semantic handshape, and bounded reclasp.
+    static final int RETURN_FRAMES = 60; // 2.4 seconds of decelerated arm and hand settling.
+    static final int RETURN_DELAY_FRAMES = 4; // Briefly finish the gesture after the voice ends.
+    static final int WORKSPACE_RETURN_FRAMES = 24;
+    static final int WORKSPACE_RETURN_SEPARATED_FRAMES = 12;
     static final int UNCLASP_FRAMES = 3;
     static final int WORKSPACE_FRAMES = 9;
-    static final int RETURN_SEPARATED_FRAMES = 12;
     static final int RECLASP_CLEARANCE_FADE_FRAMES = 5;
     static final int RECLASP_BASELINE_CONTACT_FRAMES = 3;
     static final int MAX_RAW_FRAMES = 1000;
@@ -32,9 +34,9 @@ public final class MeaningGesture {
         }
         static Style named(String name) {
             if ("legacy".equals(name)) return new Style(name, 1, 1, .5, .5, .5, .5);
-            if ("balanced".equals(name)) return new Style(name, 1, 1, .5, .5, .65, .4);
-            if ("reserved".equals(name)) return new Style(name, .65, .85, .35, .4, .4, .25);
-            if ("animated".equals(name)) return new Style(name, 1.35, 1.15, .65, .65, .7, .55);
+            if ("balanced".equals(name)) return new Style(name, 1, 1, .35, .42, .7, .25);
+            if ("reserved".equals(name)) return new Style(name, .65, .85, .25, .35, .65, .18);
+            if ("animated".equals(name)) return new Style(name, 1.1, 1.0, .45, .48, .75, .32);
             throw new IllegalArgumentException("Unknown seated gesture style: " + name);
         }
     }
@@ -74,6 +76,7 @@ public final class MeaningGesture {
         // from captured semantic BAP frames and remains immutable after bind.
         private List<Map<String, Double>> handReturnPath;
         private List<Double> handReturnClearance;
+        private boolean directReturn;
         private int audioStartFrame = -1, audioEndFrame = -1, firstRawFrame = -1, lastRawFrame = -1;
         private boolean bound;
 
@@ -145,7 +148,7 @@ public final class MeaningGesture {
                 if (poses != null || clearanceWeights != null) throw new IllegalArgumentException("Hand return poses and clearance weights are paired");
                 handReturnPath = null; handReturnClearance = null; return;
             }
-            int maximumPathLength = RETURN_FRAMES - RETURN_SEPARATED_FRAMES;
+            int maximumPathLength = WORKSPACE_RETURN_FRAMES - WORKSPACE_RETURN_SEPARATED_FRAMES;
             if (poses.size() < 2 || poses.size() != clearanceWeights.size() || poses.size() > maximumPathLength)
                 throw new IllegalArgumentException("Hand return path needs matching base and separated poses within the reclasp duration");
             List<Map<String, Double>> copiedPoses = new ArrayList<Map<String, Double>>();
@@ -172,6 +175,12 @@ public final class MeaningGesture {
             handReturnClearance = Collections.unmodifiableList(copiedWeights);
         }
 
+        /** A separated rest can settle in one continuous motion instead of reclasping. */
+        synchronized void setDirectReturn(boolean enabled) {
+            if (bound) throw new IllegalStateException("Return mode must be set before bind");
+            directReturn = enabled;
+        }
+
         synchronized boolean isBound() { return bound; }
         synchronized boolean hasRawFrames() { return firstRawFrame >= 0; }
         synchronized int firstRawFrame() { return firstRawFrame; }
@@ -179,7 +188,12 @@ public final class MeaningGesture {
         synchronized int rawFrameCount() { return raw.size(); }
         synchronized int neutralJointCount() { return stockNeutral.size(); }
         synchronized int replayStartFrame(int currentFrame) { return firstRawFrame < 0 ? -1 : Math.max(firstRawFrame, currentFrame + 1); }
-        synchronized int restoreEndFrame() { int end = Math.max(audioEndFrame, lastRawFrame); return end < 0 ? -1 : end + RETURN_FRAMES; }
+        synchronized int restoreEndFrame() {
+            if (audioEndFrame < 0) return -1;
+            if (directReturn) return returnStartFrame() + RETURN_FRAMES;
+            int end = Math.max(audioEndFrame, lastRawFrame);
+            return end < 0 ? -1 : end + WORKSPACE_RETURN_FRAMES;
+        }
         synchronized boolean activeAt(int frame) { return bound && firstRawFrame >= 0 && frame >= firstRawFrame && frame <= restoreEndFrame(); }
         synchronized boolean restoredAt(int frame) { return bound && restoreEndFrame() >= 0 && frame > restoreEndFrame(); }
 
@@ -204,8 +218,9 @@ public final class MeaningGesture {
         /**
          * Produces one complete arm/hand pose from the captured stock frame.
          * The opening first releases the clasp before the stock handshape can
-         * move across the other hand. The return first moves to separated
-         * neutral hands, then restores the accepted clasp.
+         * move across the other hand. Legacy contact rests return through the
+         * verified separated workspace; explicitly separated rests can use one
+         * continuous, fully guarded interpolation back to their resting pose.
          */
         synchronized Map<String, Double> poseAt(int frame, Map<String, Double> bases) {
             Map<String, Double> pose = new LinkedHashMap<String, Double>();
@@ -248,18 +263,20 @@ public final class MeaningGesture {
             }
             int returnStart = returnStartFrame();
             if (frame < returnStart) return semantic;
+            if (directReturn) return interpolate(semantic, seatedBase,
+                    settleEase((frame - returnStart) / (double) RETURN_FRAMES));
             int reclaspStart = reclaspStartFrame();
             if (frame < reclaspStart) {
                 double separated = returnJoinValue(joint, seatedBase);
                 return interpolate(semantic, separated,
-                        smooth((frame - returnStart + 1) / (double) RETURN_SEPARATED_FRAMES));
+                        smooth((frame - returnStart + 1) / (double) WORKSPACE_RETURN_SEPARATED_FRAMES));
             }
             if (frame < restoreEndFrame()) {
                 if (handReturnPath != null) return returnPathValue(joint,
                         Math.max(0, handReturnPath.size() - 1 - (frame - reclaspStart)), seatedBase);
                 double separated = separatedBase(joint, seatedBase);
                 return interpolate(separated, seatedBase,
-                        smooth((frame - reclaspStart) / (double) (RETURN_FRAMES - RETURN_SEPARATED_FRAMES)));
+                        smooth((frame - reclaspStart) / (double) (WORKSPACE_RETURN_FRAMES - WORKSPACE_RETURN_SEPARATED_FRAMES)));
             }
             return seatedBase;
         }
@@ -279,6 +296,7 @@ public final class MeaningGesture {
                     return smooth((releaseOffset - UNCLASP_FRAMES) / (double) (WORKSPACE_FRAMES - UNCLASP_FRAMES));
                 return 1.0;
             }
+            if (directReturn) return 1.0; // Keep the full air gap throughout the direct return.
             int reclaspStart = reclaspStartFrame();
             if (frame < reclaspStart) return handReturnClearance == null ? 1.0
                     : handReturnClearance.get(handReturnClearance.size() - 1).doubleValue();
@@ -294,6 +312,7 @@ public final class MeaningGesture {
             if (!activeAt(frame)) return frame > restoreEndFrame() ? "restored" : "static";
             if (frame < semanticStartFrame()) return "unclasp";
             if (frame < returnStartFrame()) return "semantic";
+            if (directReturn) return frame < restoreEndFrame() ? "return" : "restored";
             if (frame < reclaspStartFrame()) return "return-separated";
             if (frame < restoreEndFrame()) return "reclasp";
             return "restored";
@@ -334,8 +353,11 @@ public final class MeaningGesture {
         }
 
         private int semanticStartFrame() { return firstRawFrame + BLEND_FRAMES; }
-        synchronized int returnStartFrame() { return Math.max(lastRawFrame + 1, audioEndFrame); }
-        synchronized int reclaspStartFrame() { return returnStartFrame() + RETURN_SEPARATED_FRAMES; }
+        synchronized int returnStartFrame() {
+            int start = Math.max(lastRawFrame + 1, audioEndFrame);
+            return directReturn ? start + RETURN_DELAY_FRAMES : start;
+        }
+        synchronized int reclaspStartFrame() { return returnStartFrame() + WORKSPACE_RETURN_SEPARATED_FRAMES; }
         private double returnJoinValue(String joint, double seatedBase) {
             if (handReturnPath == null) return separatedBase(joint, seatedBase);
             return returnPathValue(joint, handReturnPath.size() - 1, seatedBase);
@@ -343,6 +365,10 @@ public final class MeaningGesture {
         private double returnPathValue(String joint, int index, double seatedBase) {
             Double target = handReturnPath.get(index).get(joint);
             return target == null ? separatedBase(joint, seatedBase) : target.doubleValue();
+        }
+        private static double settleEase(double value) {
+            double t = Math.max(0.0, Math.min(1.0, value));
+            return t * t * t * (10.0 + t * (-15.0 + 6.0 * t));
         }
         private static double separatedBase(String joint, double seatedBase) {
             return isFinger(joint) ? 0.0 : seatedBase;

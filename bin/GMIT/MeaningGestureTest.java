@@ -198,7 +198,7 @@ public final class MeaningGestureTest {
                         && bimanual.clearanceWeightAt(409) == 1.0,
                 "air-gap request rises only after fingers begin to release and reaches workspace strength at frame nine");
         int reclasp = bimanual.restoreEndFrame() - 1;
-        int reclaspStart = bimanual.restoreEndFrame() - MeaningGesture.RETURN_FRAMES + MeaningGesture.RETURN_SEPARATED_FRAMES;
+        int reclaspStart = bimanual.restoreEndFrame() - MeaningGesture.WORKSPACE_RETURN_FRAMES + MeaningGesture.WORKSPACE_RETURN_SEPARATED_FRAMES;
         require("reclasp".equals(bimanual.phaseNameAt(reclasp))
                         && bimanual.clearanceWeightAt(reclaspStart) == 1.0
                         && bimanual.clearanceWeightAt(reclaspStart + 1) < 1.0
@@ -234,7 +234,7 @@ public final class MeaningGestureTest {
         require(Math.abs(returnPath.valueAt("r_index1_flexion", 518, 28) - 61) < .01,
                 "return path leaves the exact captured semantic finger frame unchanged");
         int returnStart = returnPath.returnStartFrame(), pathJoin = returnPath.reclaspStartFrame();
-        require(pathJoin == returnStart + MeaningGesture.RETURN_SEPARATED_FRAMES,
+        require(pathJoin == returnStart + MeaningGesture.WORKSPACE_RETURN_SEPARATED_FRAMES,
                 "return path exposes the deterministic separated transition boundary");
         require(returnPath.poseAt(pathJoin, clasp).equals(expectedJoin)
                         && Math.abs(returnPath.clearanceWeightAt(pathJoin) - 1.0) < .001,
@@ -267,6 +267,32 @@ public final class MeaningGestureTest {
             new MeaningGesture.Turn("facilitator", "f-too-long-return", 1.0).setHandReturnPath(tooLong, tooLongWeights);
         } catch (IllegalArgumentException expected) { shapeRejected = true; }
         require(shapeRejected, "return path cannot outlive the fixed reclasp duration");
+        MeaningGesture.Turn direct = new MeaningGesture.Turn("facilitator", "f-direct-return", .24);
+        direct.setDirectReturn(true);
+        Map<String, Double> wrist = new LinkedHashMap<String, Double>();
+        wrist.put("l_wrist_flexion", Double.valueOf(40));
+        direct.capture(100, wrist); direct.capture(120, wrist); direct.bind(4000, 5600);
+        int directStart = direct.returnStartFrame();
+        require(direct.valueAt("l_wrist_flexion", directStart, 12) == 40,
+                "direct return starts at the final semantic pose without a jump");
+        double previous = 40;
+        for (int offset = 1; offset < MeaningGesture.RETURN_FRAMES; offset++) {
+            double value = direct.valueAt("l_wrist_flexion", directStart + offset, 12);
+            require(value < previous && value > 12, "direct return progresses without an intermediate stop or overshoot");
+            require("return".equals(direct.phaseNameAt(directStart + offset)), "direct return has one continuous phase");
+            require(direct.clearanceWeightAt(directStart + offset) == 1.0, "direct return retains the full hand air gap");
+            previous = value;
+        }
+        require(Math.abs(direct.valueAt("l_wrist_flexion", directStart + 30, 12) - 26) < .000001,
+                "direct return midpoint lies halfway between semantic pose and rest");
+        require(direct.valueAt("l_wrist_flexion", direct.restoreEndFrame(), 12) == 12,
+                "direct return ends at the exact resting pose");
+        require(direct.clearanceWeightAt(direct.restoreEndFrame()) == 0
+                        && "restored".equals(direct.phaseNameAt(direct.restoreEndFrame())),
+                "direct endpoint uses the geometry solver's checked exact-rest branch");
+        boolean returnModeLocked = false;
+        try { direct.setDirectReturn(false); } catch (IllegalStateException expected) { returnModeLocked = true; }
+        require(returnModeLocked, "return mode cannot change after audio binding");
         System.out.println("PASS meaning_gesture_stock_bap_capture_both_arms_fingers_independent_return");
     }
 
