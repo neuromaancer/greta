@@ -25,8 +25,12 @@ for new conversations and Pure bundles for behavior checks. Preserve the histori
 private weights, but do not run RL or recommend it as the current workflow.
 Offline transcript import and replay remain available. Keep new integration
 logic in this Greta checkout; the private GMIT source remains read-only.
-The current Pure adapter imports its existing GMIT episode function, so it
-still has an external dependency and is not a vendored standalone simulator.
+The user explicitly authorized migrating the Pure generation core into Greta
+on 2026-11-09. Keep the migrated code under `integrations/gmit/pure/`, retain
+its MIT notice and source provenance, and preserve dialogue scheduling,
+act selection, generation, personas, stage estimation, and model configuration.
+The current migration removes the external GMIT source dependency; private
+local assets, if required, must be documented separately from public code.
 
 Workspace roles:
 
@@ -86,9 +90,12 @@ source-to-runtime mapping on first deployment. Back up existing artifacts before
 replacement and retain a recovery method. After source changes, verify the JARs
 actually loaded by the runtime.
 
-GMIT is initially read-only. Inspect its implementation and import or call it
-from the adapter; do not copy private source, prompts, checkpoints, or real
-transcripts into the public Greta fork. Preserve its existing `AGENTS.md` and
+GMIT remains read-only. The authorized Pure-core migration may copy the
+necessary MIT-licensed generation code and generic prompt templates into Greta,
+with license, hashes, and provenance retained. This exception does not authorize
+publishing real transcripts, study data, credentials, checkpoints, or private
+few-shot records. Keep necessary private assets in ignored local storage and
+record their role explicitly. Preserve GMIT's existing `AGENTS.md` and
 research-service boundaries. Do not modify the `gmit_eval` service for this demo.
 If a core observer hook is necessary, explain the smallest change and its
 justification, then follow the user's authorized scope.
@@ -435,14 +442,26 @@ Existing scripts may iterate over multiple patient pairs. The integration runner
 must explicitly select one pair and one short episode. A smoke test must not
 accidentally start publication-scale batch evaluation or training.
 
-The Pure condition has a separate entry:
-`benchmark_llm.run_round_robin_episode`. It returns a complete episode's rows;
+The original Pure condition entry was
+`benchmark_llm.run_round_robin_episode`. Its authorized MIT-licensed port is
+`integrations.gmit.pure.episode.run_round_robin_episode`. It returns a complete episode's rows;
 do not describe it as a per-utterance live API or replace it with the RL wrapper.
-The external `integrations.gmit.run_pure` adapter imports this function from the
-private GMIT checkout and bounds one explicit pair/episode. Its local Ollama
+`integrations.gmit.run_pure` imports the port locally and bounds one explicit
+pair/episode; it no longer accepts `--gmit-root`. Its mandatory fifteen original
+few-shot pairs stay in ignored local storage, validated before contacting the
+model. A public clone requires its own authorized asset copy. Its local Ollama
 configuration is an engineering configuration, not an exact research replication.
 Preserve model identity, generation options, seeds, GMIT revision, and original
 rows in local receipts. Offline replay must work with the model server stopped.
+See `docs/gmit/PURE.md` for source provenance and the current startup path.
+Transcript replay exports SRT/JSON using actual scheduled Audio timestamps and
+display names Facilitator/A/B. `-RecordVideo` burns those captions into captured
+Ogre pixels, without the separate subtitle dialog. The local
+`integrations.gmit.export_video` encoder produces an MP4 with scheduled WAV
+audio; it refuses partial captures by default and never overwrites output.
+Use `-MeaningMiner` explicitly when semantic gestures are wanted, and retain
+hand safety. See `docs/gmit/SUBTITLES.md`; output 25 fps does not prove capture
+ran at that rate. Keep movies, frames, audio and receipts ignored locally.
 RL checkpoint selection requires existing development/validation evidence or an
 explicitly labelled provisional canonical choice; do not call an unavailable
 checkpoint validated or rank candidates using held-out outcomes.

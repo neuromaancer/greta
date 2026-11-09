@@ -1,8 +1,4 @@
-"""Run one bounded, existing GMIT Pure-LLM episode through native Ollama.
-
-This is an external caller of ``benchmark_llm.run_round_robin_episode``.  It
-does not reimplement GMIT prompts, personas, or floor scheduling.
-"""
+"""Run one bounded standalone Pure-LLM episode through native Ollama."""
 
 from __future__ import annotations
 
@@ -13,7 +9,6 @@ import multiprocessing as mp
 import os
 from queue import Empty
 import random
-import subprocess
 import sys
 import time
 import urllib.error
@@ -24,10 +19,10 @@ from typing import Any
 
 from .event_bundle import BundleError, canonicalize_rows, normalize_session_id, write_bundle
 from .importer import private_output_path
+from .pure import OllamaChatClient, PureGenerationError, load_fewshot_asset, package_provenance, run_round_robin_episode
+from .pure.taxonomy import PatientStyle, PatientType
 
 
-# GMIT is read-only.  In particular, importing its modules must not create
-# __pycache__ entries under the external checkout.
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 sys.dont_write_bytecode = True
 
@@ -80,78 +75,38 @@ def _loopback_ollama_host(value: str) -> str:
     return value.rstrip("/")
 
 
-def _configure_gmit_paths(gmit_root: str) -> Path:
-    root = Path(gmit_root).resolve(strict=True)
-    source = root / "src"
-    benchmark = root / "benchmark_llm.py"
-    if not source.is_dir() or not benchmark.is_file():
-        raise BundleError("GMIT root must contain src/ and benchmark_llm.py")
-    for item in (str(root), str(source)):
-        if item not in sys.path:
-            sys.path.insert(0, item)
-    return root
-
-
-def _gmit_revision(root: Path) -> str:
-    completed = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    return completed.stdout.strip()
-
-
 def _episode_worker(payload: dict[str, Any], result_queue: Any) -> None:
-    """Child process: isolate unbounded third-party/model calls from the parent."""
+    """Child process: isolate network/model calls from the parent."""
     try:
         os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
         sys.dont_write_bytecode = True
-        root = _configure_gmit_paths(payload["gmit_root"])
-        import numpy as np
-        import benchmark_llm  # type: ignore
-        from gmit.agents.taxonomy import PatientStyle, PatientType  # type: ignore
-        from gmit.utils.llm_router import LLMRouter  # type: ignore
-
         random.seed(payload["seed"])
-        np.random.seed(payload["seed"])
-
-        class BoundedOllamaRouter(LLMRouter):
-            """Pass bounded native-Ollama options without changing GMIT behavior."""
-
-            def chat(self, messages: list[dict[str, str]], temperature: float = 0.7, **kwargs: Any) -> str:
-                for key, value in OLLAMA_OPTIONS.items():
-                    kwargs.setdefault(key, value)
-                kwargs.setdefault("seed", payload["seed"])
-                return super().chat(messages, temperature=temperature, **kwargs)
-
-        llm_patients = BoundedOllamaRouter(provider="ollama", model=MODEL_ID, base_url=payload["ollama_host"])
-        llm_therapist = BoundedOllamaRouter(provider="ollama", model=MODEL_ID, base_url=payload["ollama_host"])
-        llm_stage = BoundedOllamaRouter(provider="ollama", model=MODEL_ID, base_url=payload["ollama_host"])
-        rows = benchmark_llm.run_round_robin_episode(
+        asset_pairs, asset_receipt = load_fewshot_asset(payload["fewshot_asset"])
+        client_options = {**OLLAMA_OPTIONS, "seed": payload["seed"]}
+        def client() -> OllamaChatClient:
+            return OllamaChatClient(
+                base_url=payload["ollama_host"],
+                model=MODEL_ID,
+                base_options=client_options,
+                timeout_seconds=payload["request_timeout_seconds"],
+            )
+        rows = run_round_robin_episode(
             episode_id=0,
             theme=payload["theme"],
             turns=payload["patient_turns"],
             patient_a_type=PatientType[payload["patient_a_type"]],
             patient_b_type=PatientType[payload["patient_b_type"]],
             patient_style=PatientStyle.GMIT,
-            llm_patients=llm_patients,
-            llm_therapist=llm_therapist,
-            llm_stage=llm_stage,
+            llm_patients=client(),
+            llm_therapist=client(),
+            llm_stage=client(),
             prompt_dir=None,
-            patient_fewshot_k=None,
+            patient_fewshot=asset_pairs,
             use_readiness=False,
             open_persona_version="v2",
             silent=True,
         )
-        result_queue.put(
-            {
-                "rows": rows,
-                "benchmark_sha256": _sha256_bytes((root / "benchmark_llm.py").read_bytes()),
-                "gmit_revision": _gmit_revision(root),
-            }
-        )
+        result_queue.put({"rows": rows, "fewshot_asset": asset_receipt, "pure": package_provenance()})
     except BaseException as exc:  # Deliver a bounded, non-secret error to the parent.
         result_queue.put({"error": f"{type(exc).__name__}: {exc}"})
 
@@ -185,8 +140,6 @@ def _run_bounded_episode(payload: dict[str, Any], timeout_seconds: float) -> dic
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gmit-root", type=Path, default=os.environ.get("GMIT_ROOT"),
-                        help="Private GMIT checkout; defaults to GMIT_ROOT when set")
     parser.add_argument("--ollama-host", default="http://127.0.0.1:11434")
     parser.add_argument("--patient-turns", type=int, default=4)
     parser.add_argument("--theme", default="Reducing red meat")
@@ -196,22 +149,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", default="pure-red-meat-ollama-v1")
     parser.add_argument("--timeout-seconds", type=float, default=180.0)
     parser.add_argument("--preflight-timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--request-timeout-seconds", type=float, default=90.0)
+    parser.add_argument("--fewshot-asset", type=Path, default=None,
+                        help="Private JSON asset; defaults to integrations/gmit/local/pure-assets/patient-fewshot.json")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--output-dir", type=Path)
     return parser
 
 
 def _validate_args(args: argparse.Namespace) -> None:
-    if args.gmit_root is None:
-        raise BundleError("set --gmit-root or GMIT_ROOT to the private GMIT checkout")
     if args.patient_turns <= 0 or args.patient_turns % 2 or args.patient_turns > 8:
         raise BundleError("--patient-turns must be an even integer from 2 through 8")
-    if args.timeout_seconds <= 0 or args.preflight_timeout_seconds <= 0:
+    if args.timeout_seconds <= 0 or args.preflight_timeout_seconds <= 0 or args.request_timeout_seconds <= 0:
         raise BundleError("timeouts must be positive")
     if not args.theme.strip():
         raise BundleError("--theme must not be empty")
     args.ollama_host = _loopback_ollama_host(args.ollama_host)
-    _configure_gmit_paths(str(args.gmit_root))
+    # Validate local, ignored examples before any model-service request.  The
+    # content remains private; only metadata enters a generated receipt.
+    _, args.fewshot_asset_receipt = load_fewshot_asset(args.fewshot_asset)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -227,13 +183,14 @@ def main(argv: list[str] | None = None) -> int:
         if output_dir.exists():
             raise BundleError(f"refusing to overwrite existing output directory: {output_dir}")
         payload = {
-            "gmit_root": str(args.gmit_root),
             "ollama_host": args.ollama_host,
             "patient_turns": args.patient_turns,
             "theme": args.theme,
             "patient_a_type": args.patient_a_type,
             "patient_b_type": args.patient_b_type,
             "seed": args.seed,
+            "fewshot_asset": str(args.fewshot_asset) if args.fewshot_asset is not None else None,
+            "request_timeout_seconds": args.request_timeout_seconds,
         }
         result = _run_bounded_episode(payload, args.timeout_seconds)
         rows = result.get("rows")
@@ -256,9 +213,9 @@ def main(argv: list[str] | None = None) -> int:
             input_sha256=None,
             title="GMIT Pure-LLM recorded episode",
             extra_receipt={
-                "generator": "benchmark_llm.run_round_robin_episode",
-                "benchmark_sha256": result.get("benchmark_sha256"),
-                "gmit_revision": result.get("gmit_revision"),
+                "generator": "integrations.gmit.pure.run_round_robin_episode",
+                "pure": result.get("pure"),
+                "fewshot_asset": result.get("fewshot_asset", args.fewshot_asset_receipt),
                 "service": identity,
                 "model": MODEL_ID,
                 "theme": args.theme,
@@ -267,11 +224,12 @@ def main(argv: list[str] | None = None) -> int:
                 "patient_b_type": args.patient_b_type,
                 "seed": args.seed,
                 "timeout_seconds": args.timeout_seconds,
+                "request_timeout_seconds": args.request_timeout_seconds,
                 "ollama_options": {**OLLAMA_OPTIONS, "seed": args.seed},
-                "role_temperatures": {"therapist_act": 0.4, "therapist_nlg": 0.7, "stage": 0.2, "patient": "GMIT-owned adaptive"},
+                "role_temperatures": {"therapist_act": 0.4, "therapist_nlg": 0.7, "stage": 0.2, "patient": "0.7 to 1.0 across five bounded retries"},
             },
         )
-    except (BundleError, OSError, KeyError, ValueError) as exc:
+    except (BundleError, PureGenerationError, OSError, KeyError, ValueError) as exc:
         print(f"pure run failed: {exc}", file=sys.stderr)
         return 2
     print(json.dumps({"events": str(result_bundle.events_path), "replay": str(result_bundle.replay_path), "receipt": str(result_bundle.receipt_path), "event_count": result_bundle.event_count}))

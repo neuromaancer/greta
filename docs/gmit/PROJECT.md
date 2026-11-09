@@ -5,8 +5,15 @@ Pure LLM is now the only active dialogue condition: after the existing fixed
 opening, the LLM selects facilitator dialogue acts and generates utterances.
 Use [REPLAY.md](REPLAY.md) for generation
 and offline playback. Historical RL code and weights remain preserved but are
-excluded from current runs. Integration changes live in Greta; Pure generation
-still imports the private GMIT episode function without editing GMIT source.
+excluded from current runs. Pure generation now runs from the MIT-licensed
+`integrations/gmit/pure/` port in Greta without importing a private GMIT checkout.
+Its fifteen original few-shot pairs remain an ignored local asset; they are not
+published with the code. See [PURE.md](PURE.md) for provenance and startup.
+Transcript replay exports synchronized SRT/JSON. `-RecordVideo` captures the
+rendered scene with subtitles burned into its pixels, and the separate local
+encoder produces an MP4 with synthesized audio. Display names are Facilitator,
+A, and B; see [SUBTITLES.md](SUBTITLES.md). MeaningMiner remains opt-in through
+`-MeaningMiner`; subtitles alone do not enable semantic gestures.
 The November 9 listener-nod update requests ten degrees over 1.36 seconds while
 preserving seeded random triggering, fairness, and exclusivity. The existing
 Pure seven-turn replay passed with all actor audio schedules, exact returns,
@@ -330,7 +337,7 @@ before connecting with `sandboxCwd is not a local file URI`; application-level
 instrumentation was used instead, without claiming desktop-tool observation.
 
 Authentic GMIT generation followed by replay, and offline transcript import,
-are now accepted as described in [REPLAY.md](REPLAY.md). The external adapter
+are now accepted as described in [REPLAY.md](REPLAY.md). The event adapter
 preserves event identities, text, actors, order, and available annotations.
 Listener gaze now passes three-speaker render and channel checks while replaying
 speech, with tabletop hand posture preserved; see the later posture/gaze record

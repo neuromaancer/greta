@@ -2,7 +2,7 @@ param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [switch]$DisableListenerGaze, [switch]$DisableListenerNods, [switch]$DisableTabletopArms,
     [switch]$MeaningMiner, [switch]$DisableHandSafety,
-    [switch]$Muted,
+    [switch]$Muted, [switch]$RecordVideo,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
@@ -14,6 +14,9 @@ if ($modes.Count -gt 1) {
     throw 'Choose only one of -Smoke, -GroupMI, -Replay, or -Original.'
 }
 $automatic = $Smoke -or $GroupMI -or [bool]$Replay
+if ($RecordVideo -and ((-not ($GroupMI -or $Replay)) -or $Preview)) {
+    throw '-RecordVideo requires a GroupMI/Replay run with speech.'
+}
 if ($Muted -and -not $automatic) { throw '-Muted requires an automatic Smoke/GroupMI/Replay run.' }
 if ($MeaningMiner -and ((-not ($GroupMI -or $Replay)) -or $DisableTabletopArms)) {
     throw 'MeaningMiner requires a seated GroupMI/Replay run with tabletop arms enabled.'
@@ -97,6 +100,8 @@ try {
     if ($automatic) {
         $compileArgs = @('-encoding', 'UTF-8', '-classpath', ('"' + (Join-Path $bin 'Modular.jar') + '"'), '-d', ('"' + $run + '"'), ('"' + (Join-Path $PSScriptRoot 'SmokeProbe.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'SeatedScene.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'ListenerGaze.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'GazeModiffAdapter.java') + '"'))
         $compileArgs += @(('"' + (Join-Path $PSScriptRoot 'MeaningMinerBridge.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'MeaningGesture.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'HandCollision.java') + '"'))
+        $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplaySubtitles.java') + '"')
+        $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplayVideo.java') + '"')
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -121,6 +126,7 @@ try {
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
         if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }
         if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }
+        if ($RecordVideo) { $arguments = @('-Dgmit.video.enabled=true') + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }

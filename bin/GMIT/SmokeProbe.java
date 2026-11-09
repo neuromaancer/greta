@@ -3,6 +3,8 @@ import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.*;
@@ -32,6 +34,10 @@ public final class SmokeProbe {
     private static int diagnosticCaptureCount;
     private static long diagnosticCaptureMaxMillis;
     private static String activeProvenance = "Synthetic authored dialogue";
+    private static ReplaySubtitles subtitles;
+    private static ReplayVideo video;
+    private static Method videoClock;
+    private static String completionSummary;
     private static final String[] ACTORS = {"facilitator", "patient-a", "patient-b"};
 
     private static final class Turn {
@@ -72,54 +78,96 @@ public final class SmokeProbe {
     }
 
     private static final class Caption {
-        private final JFrame frame;
+        private final JDialog frame;
         private final JTextArea text;
+        private final Frame player;
+        private final ComponentAdapter playerListener;
         private volatile boolean cancelled;
+        private javax.swing.Timer subtitleTicker;
+        private String shownSubtitle = "";
         Caption(final String title) throws Exception {
-            final JFrame[] holder = new JFrame[1];
+            final JDialog[] holder = new JDialog[1];
             final JTextArea[] area = new JTextArea[1];
+            final Frame[] owner = new Frame[1];
+            final ComponentAdapter[] listener = new ComponentAdapter[1];
             SwingUtilities.invokeAndWait(() -> {
-                JFrame value = new JFrame("GMIT | Group MI replay");
+                Frame player = (Frame)objects.get("gmit-player");
+                JDialog value = new JDialog(player, "GMIT | Group MI replay", false);
                 value.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
                 value.setLayout(new BorderLayout(8, 8));
                 JLabel label = new JLabel(title);
                 label.setFont(label.getFont().deriveFont(Font.BOLD, 16f));
                 label.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
-                JTextArea body = new JTextArea(8, 46);
+                JTextArea body = new JTextArea(4, 52);
                 body.setEditable(false);
                 body.setLineWrap(true);
                 body.setWrapStyleWord(true);
                 body.setFont(body.getFont().deriveFont(20f));
                 body.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
                 JButton stop = new JButton("Stop run");
-                stop.addActionListener(event -> { cancelled = true; value.dispose(); });
+                stop.addActionListener(event -> { cancelled = true; stopTicker(); value.dispose(); });
                 value.add(label, BorderLayout.NORTH);
                 value.add(new JScrollPane(body), BorderLayout.CENTER);
                 value.add(stop, BorderLayout.SOUTH);
                 value.pack();
-                Frame player = (Frame)objects.get("gmit-player");
                 Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
                 Rectangle playerBounds = player == null ? screen : player.getBounds();
-                int x = playerBounds.x + playerBounds.width + 12;
-                if (x + value.getWidth() > screen.x + screen.width) x = playerBounds.x - value.getWidth() - 12;
-                x = Math.max(screen.x, Math.min(x, screen.x + screen.width - value.getWidth()));
-                int y = Math.max(screen.y, Math.min(playerBounds.y, screen.y + screen.height - value.getHeight()));
-                value.setLocation(x, y);
+                place(value, playerBounds, screen);
+                if (player != null) {
+                    ComponentAdapter reposition = new ComponentAdapter() {
+                        @Override public void componentMoved(ComponentEvent event) { place(value, player.getBounds(), screen); }
+                        @Override public void componentResized(ComponentEvent event) { place(value, player.getBounds(), screen); }
+                    };
+                    player.addComponentListener(reposition);
+                    listener[0] = reposition;
+                }
                 value.setVisible(true);
                 holder[0] = value;
                 area[0] = body;
+                owner[0] = player;
             });
             frame = holder[0];
             text = area[0];
+            player = owner[0];
+            playerListener = listener[0];
         }
-        void show(final int index, final int total, final Turn turn, String provenance) throws Exception {
-            final String speaker = speakerLabel(turn.actor);
-            SwingUtilities.invokeAndWait(() -> text.setText(
-                provenance + "\n"
-                + "Turn " + index + "/" + total + " | " + turn.stage + " | " + turn.act + "\n"
-                + speaker + "\n\n" + turn.text));
+        private static void place(JDialog dialog, Rectangle playerBounds, Rectangle screen) {
+            int x = playerBounds.x + (playerBounds.width - dialog.getWidth()) / 2;
+            x = Math.max(screen.x, Math.min(x, screen.x + screen.width - dialog.getWidth()));
+            int y = playerBounds.y + playerBounds.height - dialog.getHeight() - 24;
+            y = Math.max(screen.y, Math.min(y, screen.y + screen.height - dialog.getHeight()));
+            dialog.setLocation(x, y);
         }
-        void close() throws Exception { SwingUtilities.invokeAndWait(() -> frame.dispose()); }
+        void startSubtitleTicker(final Method clock) throws Exception {
+            SwingUtilities.invokeAndWait(() -> {
+                if (subtitleTicker != null || subtitles == null) return;
+                subtitleTicker = new javax.swing.Timer(40, event -> {
+                    try {
+                        String value = subtitles.textAt(((Number)clock.invoke(null)).longValue());
+                        if (!value.equals(shownSubtitle)) {
+                            text.setText(value);
+                            shownSubtitle = value;
+                        }
+                    } catch (Throwable subtitleFailure) {
+                        stopTicker();
+                        if (failure == null) failure = subtitleFailure;
+                        log("subtitle_ticker_failed " + subtitleFailure);
+                    }
+                });
+                subtitleTicker.start();
+            });
+        }
+        private void stopTicker() {
+            if (subtitleTicker != null) subtitleTicker.stop();
+            subtitleTicker = null;
+        }
+        void close() throws Exception {
+            SwingUtilities.invokeAndWait(() -> {
+                stopTicker();
+                if (player != null && playerListener != null) player.removeComponentListener(playerListener);
+                frame.dispose();
+            });
+        }
         void checkCancelled() {
             if (cancelled) throw new CancelledException("Group MI run stopped by user");
         }
@@ -139,9 +187,9 @@ public final class SmokeProbe {
         SwingUtilities.invokeAndWait(() -> player.setTitle("GMIT | " + value));
     }
     private static String speakerLabel(String actor) {
-        if ("facilitator".equals(actor)) return "Facilitator (center)";
-        if ("patient-a".equals(actor)) return "Alex / patient A (left)";
-        if ("patient-b".equals(actor)) return "Sam / patient B (right)";
+        if ("facilitator".equals(actor)) return "Facilitator";
+        if ("patient-a".equals(actor)) return "A";
+        if ("patient-b".equals(actor)) return "B";
         throw new IllegalArgumentException("Unsupported actor: " + actor);
     }
     private static String readerFor(String actor) {
@@ -345,6 +393,16 @@ public final class SmokeProbe {
         diagnosticCaptureCount++;
         diagnosticCaptureMaxMillis = Math.max(diagnosticCaptureMaxMillis, System.currentTimeMillis() - captureStarted);
     }
+    private static void recordVideoFrame(Method clock) throws Exception {
+        if (video == null) return;
+        if (!video.isDue(((Number)clock.invoke(null)).longValue())) return;
+        SeatedScene.observeMeaningGesture();
+        int w=(Integer)call(captureTarget,"getCaptureWidth"), h=(Integer)call(captureTarget,"getCaptureHeight");
+        byte[] rgb=(byte[])call(captureTarget,"getCaptureData");
+        long now=((Number)clock.invoke(null)).longValue();
+        video.frame(w,h,rgb,now,subtitles == null ? "" : subtitles.textAt(now));
+    }
+    private static void recordVideoFrame() throws Exception { if (video != null) recordVideoFrame(videoClock); }
     private static void observeAudio(final String actor) throws Exception {
         audio.put(actor, new CopyOnWriteArrayList<>());
         Object performer = objects.get("gmit-" + actor + "-audio");
@@ -376,7 +434,7 @@ public final class SmokeProbe {
                                  String nextSpeaker) throws Exception {
         assertAudioCounts(expected);
         if (caption != null) caption.checkCancelled();
-        if (caption != null) caption.show(ordinal, total, scenarioTurn, activeProvenance);
+        recordVideoFrame();
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
         boolean meaningTurn = scenarioTurn != null && meaningPlans.contains(scenarioTurn.eventId);
         log("dispatch sequence=" + ordinal + " actor=" + actor + " route="
@@ -402,12 +460,22 @@ public final class SmokeProbe {
         // Greta Timer-domain schedule bounds, not a claim of physical speaker playback.
         long start = ((Number)call(a,"getTimeMillis")).longValue();
         long end = ((Number)call(a,"getEndMillis")).longValue();
+        if (scenarioTurn != null && subtitles != null) {
+            subtitles.schedule(scenarioTurn.sequence, scenarioTurn.eventId, scenarioTurn.actor, scenarioTurn.text,
+                    scenarioTurn.sourceEventId, scenarioTurn.sourceTurn, scenarioTurn.chunkIndex,
+                    scenarioTurn.chunkCount, start, end);
+            log("subtitle_scheduled event_id=" + scenarioTurn.eventId + " actor=" + scenarioTurn.actor
+                    + " start_greta_ms=" + start + " end_greta_ms=" + end);
+            if (video != null) video.audio(scenarioTurn.eventId, scenarioTurn.actor,
+                    actor + "-" + (expected.get(actor) + 1) + ".wav", start, end);
+        }
         String gazePeer = gazePeer(actor, ordinal);
         long gazeSeed = Long.getLong("gmit.gaze.seed", 711L).longValue()
                 ^ (scenarioTurn == null ? ordinal : scenarioTurn.eventId.hashCode());
         ListenerGaze.scheduleSpeech(actor, gazePeer, nextSpeaker, start, end, gazeSeed);
         if (meaningTurn) SeatedScene.bindMeaningTurn(actor, scenarioTurn.eventId, start, end);
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
+        if (caption != null) caption.startSubtitleTicker(clock);
         long engineNow = ((Number)clock.invoke(null)).longValue();
         long remaining = end-engineNow;
         if (remaining < 0 || remaining > 15000) throw new IllegalStateException("Unexpected audio schedule");
@@ -430,6 +498,7 @@ public final class SmokeProbe {
             if (failure != null) throw new IllegalStateException("Playback thread failed", failure);
             assertAudioCounts(scheduled);
             SeatedScene.observeMeaningGesture();
+            recordVideoFrame(clock);
             if ("Synthetic authored dialogue".equals(activeProvenance)) capture(String.format("%02d-%s-%03d", ordinal, actor, frame++));
             else if ((ordinal <= 3 || ordinal == total || ordinal % 25 == 0) && frame++ == 0) capture(String.format("%03d-%s", ordinal, actor));
             if (scenarioTurn != null && frame == 12) capture(String.format("gaze-%03d-%s", ordinal, actor));
@@ -447,7 +516,7 @@ public final class SmokeProbe {
                 capture(String.format("handoff-%03d-%s-to-%s", ordinal, actor, nextSpeaker));
                 capturedHandoff = true;
             }
-            sampleFaces(ordinal,actor); Thread.sleep(100);
+            sampleFaces(ordinal,actor); Thread.sleep(video == null ? 100 : 10);
         }
         assertAudioCounts(scheduled);
         expected.put(actor, scheduled.get(actor));
@@ -483,12 +552,34 @@ public final class SmokeProbe {
         catch (CancelledException cancelled) { log("CANCELLED " + cancelled.getMessage()); }
         catch (Throwable e) { log("FAILED " + e); e.printStackTrace(); }
         finally {
-            MeaningMinerBridge.close();
-            GazeModiffAdapter.close();
-            ListenerGaze.close();
-            SeatedScene.close();
-            try { SeatedScene.checkHealthy(); ListenerGaze.checkHealthy(); GazeModiffAdapter.checkHealthy(); MeaningMinerBridge.checkHealthy(); }
-            catch (Throwable e) { log("FAILED seated_cleanup " + e); status = 1; }
+            try {
+                MeaningMinerBridge.close();
+                GazeModiffAdapter.close();
+                ListenerGaze.close();
+                SeatedScene.close();
+                SeatedScene.checkHealthy();
+                ListenerGaze.checkHealthy();
+                GazeModiffAdapter.checkHealthy();
+                MeaningMinerBridge.checkHealthy();
+            } catch (Throwable e) {
+                log("FAILED seated_cleanup " + e);
+                status = 1;
+            }
+            try {
+                long videoEnd = video == null ? 0 : ((Number)videoClock.invoke(null)).longValue();
+                ReplayVideo.finishTogether(subtitles, video, status == 0, videoEnd);
+                if (subtitles != null) {
+                    log("subtitles_export srt=" + subtitles.getSrtFile().getName()
+                            + " json=" + subtitles.getJsonFile().getName()
+                            + " cues=" + subtitles.size()
+                            + " status=" + (status == 0 ? "completed" : "partial")
+                            + " timing=GretaTimer_audio_schedule physical_audio_completion=false");
+                }
+            } catch (Throwable e) {
+                log("FAILED subtitle_cleanup " + e);
+                status = 1;
+            }
+            if (status == 0 && completionSummary != null) log(completionSummary);
             System.exit(status);
         }
     }
@@ -551,7 +642,8 @@ public final class SmokeProbe {
             observeAudio(actor);
         }
         hideAutomaticReaderFrames();
-        Caption caption = scenario == null ? null : new Caption(scenario.title);
+        boolean videoEnabled = Boolean.getBoolean("gmit.video.enabled");
+        Caption caption = scenario == null || videoEnabled ? null : new Caption(scenario.title);
         if (scenario != null) { SeatedScene.install(objects); ListenerGaze.install(objects); }
         if (System.getProperty("gmit.modiff.dir") != null) {
             if (scenario == null) throw new IllegalArgumentException("MODIFF requires the seated scenario");
@@ -568,7 +660,7 @@ public final class SmokeProbe {
             title("Preparing MeaningMiner gestures for all three speakers");
             MeaningMinerBridge.install(objects, output);
             for (Turn turn : scenario.turns) {
-                caption.checkCancelled();
+                if (caption != null) caption.checkCancelled();
                 MeaningMinerBridge.prepare(turn.actor, turn.eventId, turn.text);
                 meaningPlans.add(turn.eventId);
             }
@@ -600,6 +692,12 @@ public final class SmokeProbe {
             String runLabel = scenario == null ? "Synthetic F-A-B-F" : activeProvenance;
             title(runLabel + " starts in " + seconds + " seconds"); Thread.sleep(1000);
         }
+        if (scenario != null) subtitles = new ReplaySubtitles(output);
+        if (scenario != null && videoEnabled) {
+            video = new ReplayVideo(output);
+            videoClock = entry.getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
+            recordVideoFrame(videoClock);
+        }
         Map<String,Integer> expected = new HashMap<>(); for (String actor : ACTORS) expected.put(actor, 0);
         String scenarioOrder = null;
         try {
@@ -614,6 +712,7 @@ public final class SmokeProbe {
                 }
                 if (failure != null) throw new IllegalStateException("Runtime thread failed",failure);
                 assertAudioCounts(expected);
+                recordVideoFrame();
                 title("Synthetic F-A-B-F finished");
             } else {
                 StringBuilder order = new StringBuilder();
@@ -636,13 +735,14 @@ public final class SmokeProbe {
                 SeatedScene.checkHealthy();
                 GazeModiffAdapter.checkHealthy();
                 assertAudioCounts(expected);
+                recordVideoFrame();
                 long remaining = holdUntil - System.currentTimeMillis();
                 if (remaining > 0) Thread.sleep(Math.min(100L, remaining));
             } while (System.currentTimeMillis() < holdUntil);
             GazeModiffAdapter.verify();
             log("diagnostic_capture_summary count=" + diagnosticCaptureCount + " max_ms=" + diagnosticCaptureMaxMillis);
-            if (scenario == null) log("COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation");
-            else log("COMPLETE mode=" + ("synthetic-authored".equals(scenario.provenance) ? "synthetic_group_mi" : "recorded_replay") + " provenance=" + scenario.provenance + " session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation");
+            if (scenario == null) completionSummary = "COMPLETE synthetic_sequence=F,A,B,F physical_audio_and_lips_require_observation";
+            else completionSummary = "COMPLETE mode=" + ("synthetic-authored".equals(scenario.provenance) ? "synthetic_group_mi" : "recorded_replay") + " provenance=" + scenario.provenance + " session_id=" + scenario.sessionId + " count=" + scenario.turns.size() + " order=" + scenarioOrder + " physical_audio_and_lips_require_observation";
         } finally {
             if (caption != null) caption.close();
         }

@@ -1,8 +1,14 @@
 # GMIT transcript replay contract
 
-This adapter calls or reads the separately installed GMIT project. Private
-prompts, checkpoints, generated dialogue, and imported transcripts stay outside
-version control. Playback never calls an LLM and does not advance a simulation.
+Offline import may read a private source transcript, but current Pure generation
+runs through the standalone `integrations.gmit.pure` MIT source port in this
+Greta checkout. It does not import a private GMIT runtime or depend on
+`GMIT_ROOT`. The default Pure patient flow still requires the ignored private
+15-pair local few-shot asset at
+`integrations/gmit/local/pure-assets/patient-fewshot.json`; it is validated
+before generation and is never version-controlled. Private checkpoints,
+generated dialogue, and imported transcripts stay outside version control.
+Playback never calls an LLM and does not advance a simulation.
 
 ## Original events
 
@@ -48,9 +54,14 @@ Received, scheduled, and human-observed playback remain distinct evidence.
 
 ## Execution boundaries
 
-Pure generation invokes the existing strict round-robin function for one
+Pure generation invokes the migrated strict round-robin source port for one
 explicit patient pair and one bounded episode, then converts its returned rows.
-This is authentic generation followed by replay, not token streaming or live
-turn-by-turn control. Offline import needs neither a model service nor GMIT
-Python dependencies. Receipts retain source/model/configuration identity and
-output hashes locally; public documentation contains only evidence summaries.
+The port preserves the fixed opening, act selection, NLG, patient/state flow,
+and stage estimation of the pinned MIT source revision `f2bb22d`. This is
+generation followed by replay, not token streaming or live turn-by-turn control.
+The Pure package and `run_pure.py` use only the Python standard library plus the
+local Ollama HTTP service; they do not load RL/Gym/Torch/policy dependencies.
+Offline import needs neither a model service nor GMIT Python dependencies.
+Receipts retain source-port/model/configuration identity and output hashes
+locally; public documentation contains only evidence summaries. Historical RL
+generation remains separate and archived; there is no Pure-to-RL fallback.

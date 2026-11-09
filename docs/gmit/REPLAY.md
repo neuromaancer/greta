@@ -5,18 +5,27 @@ dialogue acts and generates responses after the existing fixed opening.
 Historical RL support is retained but
 is outside the current workflow. Offline import and replay remain available.
 
-The public adapter imports the separately installed, private GMIT project. It
-does not contain GMIT prompts, personas, transcripts, or policy checkpoints.
-Generated and imported bundles remain under ignored local directories.
-All integration changes belong to this Greta repository; GMIT remains read-only.
-Generation still imports its existing episode function, so the current adapter
-is not a standalone copy of the GMIT simulator.
+Pure generation now runs through the standalone `integrations.gmit.pure` source
+port in this Greta checkout. It retains the MIT provenance of the pinned GMIT
+source revision `f2bb22d`, including the default Pure scheduler,
+patient/persona path, act selection, stage estimation, and NLG flow. It has no
+private GMIT runtime import, `GMIT_ROOT`, RL, Gym, Torch, policy, or checkpoint
+dependency. The private GMIT repository remains read-only and is no longer
+required to run a new Pure episode.
+
+This migration does **not** remove the private curated few-shot dependency used
+by the default patient flow. The required 15-pair asset lives only at the
+ignored local path `integrations/gmit/local/pure-assets/patient-fewshot.json`.
+The runner validates its exact count and receipt hash before contacting Ollama;
+it fails closed if the asset is missing or malformed. Its contents are neither
+tracked nor written to generated receipts. Generated and imported bundles also
+remain under ignored local directories.
 
 Two paths feed the same seated Greta scene:
 
-1. A bounded Pure episode uses the existing GMIT strict round-robin function,
-   one patient pair, and the selected local Ollama model. Its completed rows
-   are converted to a replay bundle.
+1. A bounded Pure episode uses the migrated strict round-robin function, one
+   patient pair, and the selected local Ollama model. Its completed rows are
+   converted to a replay bundle.
 2. Offline import converts an existing transcript to the same bundle. Import
    uses only Python's standard library; playback requires neither Ollama nor
    the GMIT Python environment.
@@ -77,8 +86,9 @@ apply if the IDE forcibly kills the parent process.
 ## Local Pure backend
 
 The selected model is `qwen3:4b-instruct-2507-q4_K_M`. Its non-thinking Instruct
-variant avoids adding a reasoning-mode adapter to GMIT. The model is shared by
-the existing role clients; dialogue state remains separate in GMIT.
+variant avoids adding a reasoning-mode adapter. The standalone Pure port creates
+separate role clients while keeping the per-patient state and strict episode
+flow distinct.
 
 The local installation uses `/home/abulimiti/.local/share/greta-gmit/` for Ollama,
 its model store, and an isolated Python environment. Override `GMIT_LOCAL_ROOT`
@@ -92,14 +102,13 @@ Its Linux amd64 archive SHA-256 is
 Follow the [manual installation procedure](https://docs.ollama.com/linux),
 extracting that archive into an isolated user directory instead of system paths.
 
-The Pure import path needs only the packages pinned in
-`integrations/gmit/requirements-pure.txt`, verified on CPython 3.12. It does not
-load a sentence encoder, SAC checkpoint, or training stack. For another machine:
+The Pure port uses only the Python standard library; `requirements-pure.txt`
+records that deliberately empty dependency surface. It does not load a sentence
+encoder, SAC checkpoint, training stack, or the Ollama Python SDK. A venv is
+optional, but can isolate the runner on another machine:
 
 ```sh
 uv venv --python python3.12 ~/.local/share/greta-gmit/venv
-uv pip install --python ~/.local/share/greta-gmit/venv/bin/python \
-  -r integrations/gmit/requirements-pure.txt
 ```
 
 Start the local server in a separate WSL terminal:
@@ -127,29 +136,34 @@ After preflight, run one short episode from the development checkout:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 ~/.local/share/greta-gmit/venv/bin/python \
-  -m integrations.gmit.run_pure --gmit-root /home/abulimiti/workspace/gmit \
+  -m integrations.gmit.run_pure \
   --patient-turns 4 --theme 'Reducing red meat' --timeout-seconds 600
 ```
 
-`--gmit-root` or `GMIT_ROOT` must identify the private checkout. Set a fresh
-`--session-id` for another generation; successful output is never overwritten.
+There is no `--gmit-root` option and `GMIT_ROOT` is ignored by this port. Supply
+`--fewshot-asset /absolute/private/patient-fewshot.json` only when intentionally
+using a different private local asset. Set a fresh `--session-id` for another
+generation; successful output is never overwritten.
 The engineering defaults are seed 42, an 8192-token context, and a maximum of
-256 generated tokens per model call. Python, NumPy, and model-call seeds are
-recorded; this does not promise bitwise reproducibility across backend versions.
+256 generated tokens per model call. Python and model-call seeds are recorded;
+this does not promise bitwise reproducibility across backend versions.
 The existing role-specific temperatures, GMIT patient style, OPEN/RECEPTIVE
 patient types, readiness disabled, and OPEN persona v2 remain explicit choices.
 
 Four patient turns mean two A/B cycles: seven original utterances including
 the existing fixed opening and final facilitator response. The other six
-utterances are generated through GMIT's LLM calls. The existing function controls
-the dialogue, patient behavior, and act selection; this adapter does not
-implement a replacement scheduler. Use the printed replay XML with the same
-PowerShell or NetBeans entry above. Generation failures do not become playable
+utterances are generated through the migrated Pure LLM calls. The port preserves
+the source scheduler rather than introducing a replacement scheduler. Use the
+printed replay XML with the same PowerShell or NetBeans entry above. Generation failures do not become playable
 successes. There is no automatic RL fallback.
+
+See [Transcript subtitles and SRT export](SUBTITLES.md) for the scheduled-audio
+timing boundary, subtitle sidecar status, and the separate local MP4 export
+path. Playback/export evidence does not establish physical-audio completion.
 
 ## Deployment and recovery
 
-Only the existing allowlisted runtime helpers are redeployed. Adapter Python,
+Only the 18 currently allowlisted runtime helpers are redeployed. Adapter Python,
 NetBeans source/configuration, and this documentation remain in `greta`.
 Transcripts and run receipts are local artifacts, not deployment-manifest
 entries. Preserve the complete package's existing resource files.
@@ -176,7 +190,11 @@ encoder from cluster, checks their hashes, strictly loads the CPU policy, and
 generates one bounded episode with the existing scheduler. See [RL.md](RL.md)
 for its separate environment, startup commands, and current acceptance evidence.
 
-## Verified Pure generation and replay, 2026-10-27
+## Historical external-adapter Pure generation and replay, 2026-10-27
+
+This historical acceptance used the former external private-GMIT adapter. It
+remains evidence for that earlier configuration, not evidence that the current
+standalone source port was used.
 
 One episode completed with OPEN/RECEPTIVE patients, the red-meat-reduction theme,
 and four patient turns. The existing GMIT function returned seven utterances in
@@ -201,6 +219,15 @@ and speaker correspondence are all normal.”
 The original rows, model/configuration identity, input/output checksums, and
 generation logs remain in ignored local bundles. GMIT source and its existing
 modified work log were not changed. No policy or encoder was loaded by Pure.
+
+## Verified standalone Pure generation, 2026-11-09
+
+The migrated runner completed local bundle `pure-migrated-20261109-01` with a
+four-row bounded episode. It used the standalone `integrations.gmit.pure` path
+and the required ignored 15-pair asset; `GMIT_ROOT` was deliberately nonexistent
+for this run. This confirms a short Pure generation can complete without a
+private GMIT runtime checkout. It does not establish broader quality,
+throughput, concurrent-rendering performance, or human playback acceptance.
 
 ## Verified offline import and replay, 2026-10-27
 
