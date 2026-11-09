@@ -255,6 +255,45 @@ Keep transcripts, logs, captures, compiled classes, and receipts local.
 
 ## Verification record
 
+### Coordinated settling in Pure replay, 2026-11-09
+
+The Pure-only nod check exposed a separate facilitator return failure at the
+nominal exact-rest endpoint. Its residual shoulder flexion and abduction
+corrections were individually small but coupled: clipping each release
+independently to one degree produced an unsafe table path. The existing guard
+rejected it and stopped playback; this was not an observed table intersection.
+
+Release-only settling now tries a proportional reduction of the existing
+correction vector if the componentwise attempt is unsafe, before the existing
+subset fallback. Its largest corrective change is one degree, other axes
+decrease proportionally, and all endpoint, body/table, finger-palm, and sampled
+path checks remain required. No escape correction or relaxed threshold is added.
+Only the six existing correction joints can change; the other 68 arm channels
+retain their targets. The sixteen-frame tail limit remains unchanged.
+
+The trusted local failed snapshot reproduces failure under `5dd75b8`. The new
+path reduces the coupled offsets in two frames and reaches the exact base with
+at most one degree of correction change per frame. The first frame also has a
+small remaining raw-target change, so its total physical joint delta is
+1.00121 degrees; the bound concerns the corrective offset, not all raw motion.
+Minimum hard endpoint and sampled-path margins are about 0.500 and 0.495 mm.
+All 74 channels are present and the 68 non-correction channels are preserved.
+The generic geometry test also passes, but does not exercise this exact coupled
+branch; the private failed-snapshot regression supplies that evidence.
+
+The subsequent final Pure replay completed all seven turns and exact
+restorations with 1,553 passing projected frames and 600 observed samples.
+This run did not need a settling extension; the private regression establishes
+the new branch. The updated helper was deployed through the existing allowlist
+with originals retained in runtime
+`bin/GMIT/local/deploy-20261109T114912630328Z/receipt.json`.
+The complete session rollback sequence, including the independent nod tuning,
+is in [GROUP_MI.md](GROUP_MI.md#listener-nod-visibility-2026-11-09).
+The later user-requested repeat failed closed on a different final-return
+state at frame 2840. Its bounded fractional-release probe found no route under
+the unchanged release limits; that case remains unresolved. The successful
+frame-1803 regression does not establish a general return-path solver.
+
 ### Replay repair and right-palm calibration, 2026-11-07
 
 The user's independent replay stopped during patient A's final restored frame.

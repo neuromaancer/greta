@@ -17,6 +17,17 @@ blinking, and verified gaze, head movement, and gestures. Do not enable VAP,
 MODIFF, OpenFace, ASR, cameras, or advanced expression prediction in the initial
 phase.
 
+The active dialogue condition is Pure LLM only, as requested on 2026-11-09:
+the LLM chooses facilitator dialogue acts and generates the corresponding
+utterances after the existing fixed opening. Preserve and disclose that opening
+exception; do not describe it as LLM-generated. Use `integrations.gmit.run_pure`
+for new conversations and Pure bundles for behavior checks. Preserve the historical RL implementation and
+private weights, but do not run RL or recommend it as the current workflow.
+Offline transcript import and replay remain available. Keep new integration
+logic in this Greta checkout; the private GMIT source remains read-only.
+The current Pure adapter imports its existing GMIT episode function, so it
+still has an external dependency and is not a vendored standalone simulator.
+
 Workspace roles:
 
 - `greta`: development source in the personal fork; task branch
@@ -203,8 +214,11 @@ it cannot enter the normal escape search, increase a correction, or relax a
 collision threshold. Cache normal and release-only results separately and route
 reprojected settling frames through the same release-only solver. The next
 speaker waits for the actual exact-rest endpoint. Preserve the preceding safe corrective offset and release it by
-at most one degree per joint per frame; if full release is unsafe, choose a
-checked subset of the nonzero correction axes that makes progress toward zero.
+at most one degree per joint per frame. If componentwise release is unsafe,
+try a checked proportional reduction of the existing correction vector before
+choosing a checked subset of its nonzero axes. Preserve the coupled direction,
+strict reduction, and every endpoint and sampled-path guard; do not invent a
+new correction during settling.
 Refine new coarse corrections toward
 the previous offset while retaining every safety check. The exact-rest frame
 must satisfy the same smaller release bound, rather than hiding a final snap.
@@ -355,7 +369,8 @@ neck/eye-only masks so older queued frames cannot restore the previous gaze.
 Gaze owns the cervical channels while enabled and composes a small listener nod
 into pitch. Seeded backchannels have a 50% per-turn chance, at most one listener
 nod per turn, after the initial gaze settles and before handoff/end. A nod lasts
-28 frames (1.12 seconds) with smooth onset and return. Among eligible listeners,
+34 frames (1.36 seconds) with a ten-degree pitch peak and smooth onset and
+return. Among eligible listeners,
 prefer the smallest session-local count of scheduled nods and break ties using
 the seeded random generator. The facilitator participates whenever listening;
 do not force a nod or extend it beyond the available turn interval. The two

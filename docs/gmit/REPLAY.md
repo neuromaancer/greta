@@ -1,8 +1,16 @@
 # Pure generation and offline transcript replay
 
+Pure LLM is the active condition from 2026-11-09: the LLM selects facilitator
+dialogue acts and generates responses after the existing fixed opening.
+Historical RL support is retained but
+is outside the current workflow. Offline import and replay remain available.
+
 The public adapter imports the separately installed, private GMIT project. It
 does not contain GMIT prompts, personas, transcripts, or policy checkpoints.
 Generated and imported bundles remain under ignored local directories.
+All integration changes belong to this Greta repository; GMIT remains read-only.
+Generation still imports its existing episode function, so the current adapter
+is not a standalone copy of the GMIT simulator.
 
 Two paths feed the same seated Greta scene:
 

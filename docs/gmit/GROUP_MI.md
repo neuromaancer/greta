@@ -183,8 +183,8 @@ translation and yaw, and smooths bounded head/eye turns over 18 Greta frames
 speaker takes priority at utterance end. The final head transition is scheduled
 inside the audio interval so it finishes as speech ends. Listener turns remain
 scheduled from the actual Audio start plus 200 ms. A deterministic seed controls
-an optional single listener nod per turn (50% probability, 4-degree pitch).
-Each nod lasts 1.12 seconds with a smooth onset and return. When a nod is
+an optional single listener nod per turn (50% probability, 10-degree pitch).
+Each nod lasts 1.36 seconds with a smooth onset and return. When a nod is
 triggered, the eligible listener with fewer scheduled nods in this session has
 priority; ties are resolved by the seeded random generator. The facilitator is
 eligible whenever a patient is speaking. The two listeners can turn toward the
@@ -192,6 +192,73 @@ speaker together, but only one can nod in a turn.
 Only cervical yaw/pitch and four eyeball FAP channels are controlled. LipBlender
 output is cloned before those eye channels change; mouth and eyelid masks remain
 intact. Finite gaze-only frames also move idle listeners without requiring speech.
+
+### Listener nod visibility, 2026-11-09
+
+The user reported that the previous version's nods were barely visible. The
+nod now requests ten degrees of cumulative cervical pitch over 34 frames
+(1.36 seconds), up from four degrees over 28 frames. The angle is distributed
+over seven cervical joints; it is not ten degrees at each joint. Earlier
+seven-degree and 5.5-degree candidates did not establish visual acceptance.
+The user subsequently clarified that the motion should be more visible than
+seven degrees; the 5.5-degree version was visible but too subtle. The smooth
+single down-and-return envelope, seeded 50% trigger, preference for listeners
+with fewer scheduled nods, and one-nodding-listener limit remain unchanged.
+Short turns omit a nod when there is insufficient room after gaze settling
+and before the handoff. These are scheduled backchannels, not an inference
+of a listener's understanding or agreement.
+
+Windows JDK 8 compilation and the focused gaze tests passed with backchannels
+both enabled and disabled. Tests cover the actual scheduled nod's peak, neutral
+endpoints, timing, fairness, seeded randomness, and exclusivity. The behavior
+check uses an existing Pure conversation; it does not generate a new episode
+or use the historical RL path. The nod deployment changes only
+`bin/GMIT/ListenerGaze.java` through the unchanged sixteen-file allowlist. A
+subsequent Pure replay exposed a separate coordinated-return case; its guarded
+fix changes `bin/GMIT/HandCollision.java` and is described in
+[MEANING_MINER.md](MEANING_MINER.md#coordinated-settling-in-pure-replay-2026-11-09).
+Originals are retained in runtime deployment receipts. The first, rejected seven-degree
+candidate used `bin/GMIT/local/deploy-20261109T113243045488Z/receipt.json`.
+
+The final ten-degree run `replay-20261109-125713-158` exited successfully after
+seven F/A/B/F/A/B/F audio schedules and exact restorations. All 1,553 projected
+frames passed, with 600 observed samples and 31 gaze-phase checks. Five
+34-frame nods were scheduled for F/A/B/A/B; no two listeners nodded together.
+This run needed no additional settling frame. Its largest queue batch was
+78 ms, and fifty diagnostic captures had a 615 ms maximum including scene
+initialization. These are separate measurements, not a sustained 25 fps or
+continuous mesh-collision guarantee. This check replayed the existing Pure
+bundle; no new LLM generation, RL inference, MODIFF worker, or video export was
+run. Human visibility and naturalness are recorded separately from completion.
+On the user-requested repeat, the user confirmed that the ten-degree nod was
+clear and natural and that hands, speech, lips, and gaze were normal. That
+human observation is separate from the preceding run's programmatic counts.
+The repeat `replay-20261109-130129-959` subsequently stopped at the facilitator's
+last return (frame 2840) after all seven audio schedules but only six completed
+restorations. It is not a successful repeat. The existing safety guard rejected
+a further release-only case involving left shoulder corrections. The earlier
+complete run remains valid evidence for that run, not proof of repeatability.
+An offline bounded search of fractional coupled/subset releases (2,176 checked
+candidates, a frontier capped at 32, and a sixteen-frame budget) did not find
+an exact-rest route for that snapshot. This is not a proof that no continuous
+path exists. The guard remains fail-closed; no threshold, channel owner, or
+release budget was relaxed. This residual limitation requires separate return
+planning work and is not claimed solved by the nod or frame-1803 repair.
+Independent review accepted the earlier completed run's code and evidence
+boundary; the later return failure remains a separate unresolved limitation.
+
+Restore the pre-session nod implementation by rolling back this session's
+receipts in reverse order from the development checkout in WSL. The
+5.5-degree candidate's receipt is `deploy-20261109T113705842307Z/receipt.json`;
+the subsequent return fix uses `deploy-20261109T114912630328Z/receipt.json`, and
+the stronger ten-degree nod uses `deploy-20261109T115700898071Z/receipt.json`:
+
+```sh
+for receipt in deploy-20261109T115700898071Z deploy-20261109T114912630328Z deploy-20261109T113705842307Z deploy-20261109T113243045488Z; do
+  python3 integrations/gmit/deploy.py --runtime '/mnt/c/Users/alafate abulimiti/research/workspace/greta_2.1' --rollback "/mnt/c/Users/alafate abulimiti/research/workspace/greta_2.1/bin/GMIT/local/$receipt/receipt.json"
+done
+```
+
 Gaze has priority over concurrent cervical gestures; the nod is a bounded
 gaze-layer feature rather than evidence for arbitrary nod/gesture composition.
 

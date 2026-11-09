@@ -1,6 +1,23 @@
 # GMIT in Greta
 
-Updated 2026-11-07. P0 inspection and synthetic P1 acceptance are complete.
+Updated 2026-11-09. P0 inspection and synthetic P1 acceptance are complete.
+Pure LLM is now the only active dialogue condition: after the existing fixed
+opening, the LLM selects facilitator dialogue acts and generates utterances.
+Use [REPLAY.md](REPLAY.md) for generation
+and offline playback. Historical RL code and weights remain preserved but are
+excluded from current runs. Integration changes live in Greta; Pure generation
+still imports the private GMIT episode function without editing GMIT source.
+The November 9 listener-nod update requests ten degrees over 1.36 seconds while
+preserving seeded random triggering, fairness, and exclusivity. The existing
+Pure seven-turn replay passed with all actor audio schedules, exact returns,
+1,553 projected frames, and 600 observed samples. A separate guarded return fix
+preserves the one-degree corrective release bound by retaining coupled shoulder
+directions. See [GROUP_MI.md](GROUP_MI.md#listener-nod-visibility-2026-11-09) for
+the current deployment and complete rollback sequence. The user accepted the
+ten-degree nod and other behavior in the observed portion of a requested repeat;
+that repeat later stopped during the final hand return. This is not evidence
+of repeatable seven-turn completion; the fail-closed limitation is recorded in
+the same verification section.
 The authored group MI extension adds a 13-turn conversation about reducing
 red meat, with a table and three seated characters. See [GROUP_MI.md](GROUP_MI.md)
 for launch commands, NetBeans settings, and evidence.

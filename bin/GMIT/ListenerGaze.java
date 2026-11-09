@@ -21,9 +21,9 @@ public final class ListenerGaze {
     private static final int MIDPOINT_TRANSITION_FRAMES = 28;
     private static final int TRANSITION_FRAMES = 18;
     private static final int HANDOFF_TRANSITION_FRAMES = 18;
-    private static final int NOD_DURATION_FRAMES = 28; // 1.12 seconds, with a gentle start and finish.
+    private static final int NOD_DURATION_FRAMES = 34; // 1.36 seconds: visible but still a single conversational bob.
     private static final int NOD_SETTLE_FRAMES = 2;
-    private static final double NOD_PITCH_RADIANS = Math.toRadians(4);
+    private static final double NOD_PITCH_RADIANS = Math.toRadians(10);
     private static volatile Throwable failure;
     private static String speaker;
     private static Method currentFrame;
@@ -203,6 +203,12 @@ public final class ListenerGaze {
         long result = 531L;
         result = 31 * result + speakerId.hashCode(); result = 31 * result + peerId.hashCode();
         result = 31 * result + start; return 31 * result + end;
+    }
+
+    /** One smooth down-and-return nod; endpoints remain neutral for frame compositing. */
+    static double nodPitchAt(int start, int durationFrames, double pitch, int frame) {
+        double t = (frame - start) / (double)durationFrames;
+        return t <= 0 || t >= 1 ? 0 : pitch * .5 * (1.0 - Math.cos(2.0 * Math.PI * t));
     }
 
     private static void validateActorId(String id, String label) {
@@ -441,8 +447,7 @@ public final class ListenerGaze {
             final double pitch;
             Nod(int start, int durationFrames, double pitch) { this.start = start; this.durationFrames = durationFrames; this.pitch = pitch; }
             double at(int frame) {
-                double t = (frame - start) / (double)durationFrames;
-                return t <= 0 || t >= 1 ? 0 : pitch * .5 * (1.0 - Math.cos(2.0 * Math.PI * t));
+                return nodPitchAt(start, durationFrames, pitch, frame);
             }
         }
         Object face(Object source) throws Exception {

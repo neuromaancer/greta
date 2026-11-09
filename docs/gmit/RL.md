@@ -1,5 +1,10 @@
 # Local RL generation and Greta replay
 
+**Historical workflow.** From 2026-11-09, this project uses Pure LLM only for
+new dialogue generation: the LLM chooses dialogue acts and generates utterances.
+Use [the Pure workflow](REPLAY.md) for current runs. The implementation, local
+weights, and evidence below are retained for reproducibility.
+
 The RL adapter runs one short episode using the private GMIT SAC policy and
 the existing round-robin evaluation environment. The policy selects facilitator
 dialogue acts; the local Ollama model supplies language generation and the

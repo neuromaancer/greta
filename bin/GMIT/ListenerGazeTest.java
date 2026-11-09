@@ -30,18 +30,31 @@ public final class ListenerGazeTest {
         require(event(nextOtherPeer, "speaker-handoff", "facilitator") == null,
                 "does not oscillate at the end when midpoint already faces next actor");
 
+        ListenerGaze.TimingEvent scheduledNod = null;
         for (long seed = 0; seed < 64; seed++) {
             ListenerGaze.TimingPlan plan = ListenerGaze.planTiming(
                     "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0);
             require(plan.nodCount() <= 1, "listener nods never overlap");
             require(plan.nodCount() == 0 || plan.nodCount() == 1, "at most one stochastic nod is scheduled");
             for (ListenerGaze.TimingEvent event : plan.events()) if (event.nod) {
-                require(event.duration * 40 >= 1000 && event.duration * 40 <= 1400,
+                if (scheduledNod == null) scheduledNod = event;
+                require(event.duration * 40 >= 1200 && event.duration * 40 <= 1400,
                         "listener backchannel remains visible for about one second");
                 require(event.start >= plan.listenerFrame + 20, "nod waits for listener yaw to settle");
                 int deadline = plan.handoffFrame < 0 ? plan.endFrame : plan.handoffFrame;
                 require(event.start + event.duration + 2 <= deadline, "nod finishes before interval end/handoff");
             }
+        }
+        if (Boolean.parseBoolean(System.getProperty("gmit.gaze.backchannel", "true"))) {
+            require(scheduledNod != null, "adjacent deterministic seeds include a generated nod for envelope verification");
+            int midpoint = scheduledNod.start + scheduledNod.duration / 2;
+            double peak = ListenerGaze.nodPitchAt(scheduledNod.start, scheduledNod.duration, scheduledNod.pitch, midpoint);
+            require(Math.toDegrees(peak) > 9 && Math.toDegrees(peak) < 11,
+                    "the generated nod reaches the configured aggregate pitch target");
+            require(ListenerGaze.nodPitchAt(scheduledNod.start, scheduledNod.duration, scheduledNod.pitch, scheduledNod.start) == 0
+                            && ListenerGaze.nodPitchAt(scheduledNod.start, scheduledNod.duration, scheduledNod.pitch,
+                                    scheduledNod.start + scheduledNod.duration) == 0,
+                    "the generated nod starts and ends neutral");
         }
         ListenerGaze.TimingPlan continuation = ListenerGaze.planTiming(
                 "patient-a", "facilitator", "patient-a", 1000, 2800, 71L, 0);

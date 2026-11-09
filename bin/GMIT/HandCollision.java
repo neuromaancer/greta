@@ -538,6 +538,15 @@ public final class HandCollision {
                     && safePath(previousProjected, relaxed, previousClearance, clearance,
                             previousFingerPalmClearance, fingerPalmClearance))
                 return new Result(relaxed, before, relaxedMetrics, true, maxCorrection(relaxed, base));
+            Map<String, Double> proportional = proportionalRelaxation(base, retained);
+            if (proportional != null) {
+                Metrics proportionalMetrics = measure(proportional);
+                if (proportionalMetrics.minimum() >= clearance && proportionalMetrics.fingerPalm >= fingerPalmClearance
+                        && proportionalMetrics.boundaryMinimum() >= 0
+                        && safePath(previousProjected, proportional, previousClearance, clearance,
+                                previousFingerPalmClearance, fingerPalmClearance))
+                    return new Result(proportional, before, proportionalMetrics, true, maxCorrection(proportional, base));
+            }
             Map<String, Double> selective = selectiveRelaxation(base, retained, previousProjected, previousCandidate,
                     previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
             if (selective != null) {
@@ -547,6 +556,24 @@ public final class HandCollision {
             // Retaining without verified progress would only conceal a stuck
             // correction until the bounded tail expires.
             return new Result(retained, before, retainedMetrics, false, maxCorrection(retained, base));
+        }
+
+        /** Preserves coupled corrective direction while reducing its largest axis by one degree. */
+        private Map<String, Double> proportionalRelaxation(Map<String, Double> candidate, Map<String, Double> retained) {
+            double maximum = 0;
+            for (String joint : correctionJoints()) {
+                Double raw = candidate.get(joint), value = retained.get(joint);
+                if (raw != null && value != null) maximum = Math.max(maximum, Math.abs(value.doubleValue() - raw.doubleValue()));
+            }
+            if (maximum <= RELAX_CORRECTION_STEP + EPSILON) return null;
+            double scale = (maximum - RELAX_CORRECTION_STEP) / maximum;
+            Map<String, Double> output = new LinkedHashMap<String, Double>(retained);
+            for (String joint : correctionJoints()) {
+                Double raw = candidate.get(joint), value = retained.get(joint);
+                if (raw != null && value != null)
+                    output.put(joint, Double.valueOf(raw.doubleValue() + (value.doubleValue() - raw.doubleValue()) * scale));
+            }
+            return output;
         }
 
         private List<Map<String, Double>> seedCandidates(Map<String, Double> candidate, String[] joints, double[][] levels) {
