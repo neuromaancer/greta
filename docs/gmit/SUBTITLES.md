@@ -124,8 +124,11 @@ four audio schedules and four subtitle cues. It recorded exclusive ten-degree
 nods for the facilitator and patient A. Its `playback.mp4` contains H.264
 920 x 576 video (38.960 s), AAC audio (38.964 s), and a 38.964 s container. The
 encoded duration matches the Greta schedule within one output frame. Root
-decoded a frame from the MP4 and confirmed the visible caption and gesture;
-that is separate from full audiovisual human acceptance, which is pending.
+decoded a frame from the MP4 and confirmed the visible caption and gesture.
+On 2026-11-09, the user watched this movie and confirmed that its subtitles,
+audio, gestures and listener nods were all correct (translated feedback).
+This acceptance applies to the recorded movie, not the later end-hold capture
+follow-up or every possible transcript.
 
 The encoder's initial real-capture check caught a short CFR output. Explicit
 `fps=25` conversion now duplicates measured VFR frames correctly. The capture
