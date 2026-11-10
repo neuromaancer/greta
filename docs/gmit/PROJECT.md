@@ -14,6 +14,10 @@ rendered scene with subtitles burned into its pixels, and the separate local
 encoder produces an MP4 with synthesized audio. Display names are Facilitator,
 A, and B; see [SUBTITLES.md](SUBTITLES.md). MeaningMiner remains opt-in through
 `-MeaningMiner`; subtitles alone do not enable semantic gestures.
+The [six controlled transcript drafts](CONDITIONS.md) illustrate a proposed
+task/social by buddy/individualist 2 x 3 design. They are explicitly
+assistant-authored synthetic stimuli, not raw local-Qwen simulation output;
+the earlier automatic long-session drafts were rejected in text review.
 The November 9 listener-nod update requests ten degrees over 1.36 seconds while
 preserving seeded random triggering, fairness, and exclusivity. The existing
 Pure seven-turn replay passed with all actor audio schedules, exact returns,
