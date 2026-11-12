@@ -474,6 +474,8 @@ public final class SeatedScene {
             @Override protected boolean removeEldestEntry(Map.Entry<List<Object>, HandCollision.Result> eldest) { return size() > 512; }
         };
         private final Map<List<Object>, HandCollision.Result> calibratedOpening = new LinkedHashMap<List<Object>, HandCollision.Result>();
+        private Map<List<Object>, HandCollision.Result> checkedReturn = Collections.emptyMap();
+        private MeaningGesture.TabletopApproach returnApproach = MeaningGesture.TabletopApproach.DIRECT;
         private final List<Map<String, Double>> handOpeningPath = new ArrayList<Map<String, Double>>();
         private final List<Double> handOpeningWeights = new ArrayList<Double>();
         private final TreeMap<Integer, Map<String, Double>> safePoses = new TreeMap<Integer, Map<String, Double>>();
@@ -634,8 +636,13 @@ public final class SeatedScene {
             // batch. APFrameList blends same-frame masked channels with the
             // later submission, so this atomically replaces stale projected
             // return values without cancelling unrelated gaze frames.
-            if (turn != null && turn.isBound() && turn.hasRawFrames())
+            if (turn != null && turn.isBound() && turn.hasRawFrames()) {
+                // A later Realizer batch can change the remaining return even
+                // when the first projected frame has an identical pose.
+                checkedReturn = Collections.emptyMap();
+                returnApproach = MeaningGesture.TabletopApproach.DIRECT;
                 replayCapturedArms(turn, true);
+            }
             List<Object> overlaid = new ArrayList<Object>();
             for (Object frame : source) {
                 Object copy = frame.getClass().getMethod("clone").invoke(frame);
@@ -656,6 +663,8 @@ public final class SeatedScene {
             meaningTurn = new MeaningGesture.Turn(actor, eventId, seatedGestureGain(), pose.gestureOffsets, pose.style, pose.releaseLead);
             meaningTurn.setDirectReturn(pose.directReturn);
             if (HAND_SAFETY) meaningTurn.setHandReturnPath(handOpeningPath, handOpeningWeights);
+            checkedReturn = Collections.emptyMap();
+            returnApproach = MeaningGesture.TabletopApproach.DIRECT;
             observedMeaningMovement = false;
             observedMeaningRestored = false;
             observedMeaningBodyMaskFilter = false;
@@ -755,6 +764,7 @@ public final class SeatedScene {
                         + " nominal_end_frame=" + turn.nominalDirectRestoreEndFrame() + " actual_end_frame=" + turn.restoreEndFrame()
                         + " extension_frames=" + turn.directSettleFrames());
             meaningTurn = null;
+            checkedReturn = Collections.emptyMap();
             projectionMemo.clear();
             System.out.println("GMIT_MEANING_GESTURE finished actor=" + actor + " event=" + eventId + " frame=" + frameNumber);
         }
@@ -892,12 +902,22 @@ public final class SeatedScene {
             Map<String, Double> previousCandidate = prior == null ? base : candidatePoses.get(prior.getKey());
             double previousClearance = prior == null ? handContact : requiredClearances.get(prior.getKey()).doubleValue();
             double previousPalmClearance = prior == null ? fingerPalmContact : requiredFingerPalmClearances.get(prior.getKey()).doubleValue();
+            if (pose.tabletopContact && "return".equals(phase)) {
+                target = turn.poseAt(frame, base, returnApproach);
+                List<Object> returnKey = projectionKey(projectionMode, target, predecessor, previousCandidate, base,
+                        motionPhase, previousClearance, clearance, previousPalmClearance, palmClearance);
+                if (!checkedReturn.containsKey(returnKey)) {
+                    checkTabletopReturn(turn, frame, predecessor, previousCandidate);
+                    target = turn.poseAt(frame, base, returnApproach);
+                }
+            }
             // A late raw batch changes the candidate or predecessor key. Exact
             // repeated future holds can reuse a result without repeating FK.
             List<Object> key = projectionKey(projectionMode, Collections.unmodifiableMap(target), predecessor, previousCandidate, base,
                     Double.valueOf(motionPhase), Double.valueOf(previousClearance), Double.valueOf(clearance),
                     Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance));
-            HandCollision.Result result = projectionMemo.get(key);
+            HandCollision.Result result = checkedReturn.get(key);
+            if (result == null) result = projectionMemo.get(key);
             if (result == null) {
                 long started = System.nanoTime();
                 if ("settling".equals(phase)) {
@@ -935,7 +955,8 @@ public final class SeatedScene {
                 key = projectionKey(projectionMode, Collections.unmodifiableMap(target), predecessor, previousCandidate, base,
                         Double.valueOf(motionPhase), Double.valueOf(previousClearance), Double.valueOf(clearance),
                         Double.valueOf(previousPalmClearance), Double.valueOf(palmClearance));
-                HandCollision.Result settled = projectionMemo.get(key);
+                HandCollision.Result settled = checkedReturn.get(key);
+                if (settled == null) settled = projectionMemo.get(key);
                 if (settled == null) {
                     long started = System.nanoTime();
                     settled = handModel.settleAtBase(base, predecessor, previousCandidate, previousClearance, clearance,
@@ -979,6 +1000,62 @@ public final class SeatedScene {
             requiredClearances.put(Integer.valueOf(frame), Double.valueOf(clearance));
             requiredFingerPalmClearances.put(Integer.valueOf(frame), Double.valueOf(palmClearance));
             return result.pose;
+        }
+
+        /** Check the entire remaining approach before committing to its first frame. */
+        private void checkTabletopReturn(MeaningGesture.Turn turn, int start,
+                Map<String, Double> predecessor, Map<String, Double> previousCandidate) throws Exception {
+            long started = System.nanoTime();
+            try {
+                for (MeaningGesture.TabletopApproach approach : MeaningGesture.TabletopApproach.values()) {
+                    Map<List<Object>, HandCollision.Result> trial = new LinkedHashMap<List<Object>, HandCollision.Result>();
+                    if (!checkReturnProfile(turn, start, approach, predecessor, previousCandidate, trial)) continue;
+                    checkedReturn = trial;
+                    returnApproach = approach;
+                    System.out.println("GMIT_HAND_SAFETY return_plan actor=" + actor + " event=" + turn.eventId
+                            + " start_frame=" + start + " approach=" + approach
+                            + " plan_ms=" + (System.nanoTime() - started) / 1000000);
+                    return;
+                }
+            } finally {
+                safetyProjectionNanos += System.nanoTime() - started;
+            }
+            writeSafetyTrace(turn);
+            throw new IllegalStateException("No safe tabletop return to exact rest actor=" + actor
+                    + " event=" + turn.eventId + " frame=" + start);
+        }
+
+        private boolean checkReturnProfile(MeaningGesture.Turn turn, int start, MeaningGesture.TabletopApproach approach,
+                Map<String, Double> predecessor, Map<String, Double> previousCandidate,
+                Map<List<Object>, HandCollision.Result> trial) {
+            // Separated direct rests have the same hand clearance throughout
+            // return and at rest. The tabletop envelope is evaluated per pose.
+            int end = turn.nominalDirectRestoreEndFrame();
+            for (int frame = start; frame <= end + MeaningGesture.MAX_DIRECT_SETTLE_FRAMES; frame++) {
+                boolean terminal = frame >= end;
+                double phase = terminal ? 0 : 1;
+                Map<String, Double> target = turn.poseAt(frame, handBase, approach);
+                List<Object> key = projectionKey("normal", target, predecessor, previousCandidate, handBase,
+                        phase, handContact, handContact, fingerPalmContact, fingerPalmContact);
+                HandCollision.Result result = handModel.correct(target, handBase, phase, predecessor, previousCandidate,
+                        handContact, handContact, fingerPalmContact, fingerPalmContact);
+                safetySolves++;
+                trial.put(key, result);
+                if (terminal && result.cleared) return true;
+                if (terminal) {
+                    if (frame == end + MeaningGesture.MAX_DIRECT_SETTLE_FRAMES) return false;
+                    key = projectionKey("release-only", handBase, predecessor, previousCandidate, handBase,
+                            phase, handContact, handContact, fingerPalmContact, fingerPalmContact);
+                    result = handModel.settleAtBase(handBase, predecessor, previousCandidate,
+                            handContact, handContact, fingerPalmContact, fingerPalmContact);
+                    safetySolves++;
+                    trial.put(key, result);
+                }
+                if (!result.cleared) return false;
+                predecessor = result.pose;
+                previousCandidate = target;
+            }
+            return false;
         }
 
         private static boolean sameArmPose(Map<String, Double> left, Map<String, Double> right) {

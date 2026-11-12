@@ -53,6 +53,25 @@ public final class MeaningGesture {
         return (int)((millis + FRAME_MILLIS - 1) / FRAME_MILLIS);
     }
 
+    enum TabletopApproach {
+        DIRECT(0, 0, 0), LEFT_ELBOW(0, 1, 0), RIGHT_ELBOW(0, 0, 1), SHOULDERS(1, 0, 0), HIGHER_SHOULDERS(2, 0, 0);
+
+        private final int shoulders, leftElbow, rightElbow;
+
+        TabletopApproach(int shoulders, int leftElbow, int rightElbow) {
+            this.shoulders = shoulders;
+            this.leftElbow = leftElbow;
+            this.rightElbow = rightElbow;
+        }
+
+        double lift(String joint) {
+            if ("l_shoulder_flexion".equals(joint) || "r_shoulder_flexion".equals(joint)) return shoulders;
+            if ("l_elbow_flexion".equals(joint)) return leftElbow;
+            if ("r_elbow_flexion".equals(joint)) return rightElbow;
+            return 0;
+        }
+    }
+
     /**
      * MeaningMiner, the Planner and the character lexicon choose the gesture.
      * This object only captures their actual BAP arm/finger output and blends
@@ -198,6 +217,7 @@ public final class MeaningGesture {
             directReturn = enabled;
         }
 
+
         synchronized boolean isBound() { return bound; }
         synchronized boolean hasRawFrames() { return firstRawFrame >= 0; }
         synchronized int firstRawFrame() { return firstRawFrame; }
@@ -250,18 +270,26 @@ public final class MeaningGesture {
          * continuous, fully guarded interpolation back to their resting pose.
          */
         synchronized Map<String, Double> poseAt(int frame, Map<String, Double> bases) {
+            return poseAt(frame, bases, TabletopApproach.DIRECT);
+        }
+
+        synchronized Map<String, Double> poseAt(int frame, Map<String, Double> bases, TabletopApproach approach) {
             Map<String, Double> pose = new LinkedHashMap<String, Double>();
             if (bases == null) return pose;
             for (Map.Entry<String, Double> entry : bases.entrySet()) {
                 String joint = entry.getKey();
                 double base = entry.getValue().doubleValue();
-                pose.put(joint, Double.valueOf(valueAt(joint, frame, base)));
+                pose.put(joint, Double.valueOf(valueAt(joint, frame, base, approach)));
             }
             return pose;
         }
 
         /** Backwards-compatible single-channel view used by focused tests. */
         synchronized double valueAt(String joint, int frame, double seatedBase) {
+            return valueAt(joint, frame, seatedBase, TabletopApproach.DIRECT);
+        }
+
+        private double valueAt(String joint, int frame, double seatedBase, TabletopApproach approach) {
             if (!activeAt(frame)) return seatedBase;
             Double rawValue = valueAtOrBefore(joint, frame);
             // A semantic BAP batch may mask only part of a hand.  Missing
@@ -292,8 +320,15 @@ public final class MeaningGesture {
             if (frame < returnStart) return semantic;
             if (directReturn) {
                 if (frame >= nominalDirectRestoreEndFrame()) return seatedBase;
-                return interpolate(semantic, seatedBase,
-                        settleEase((frame - returnStart) / (double) RETURN_FRAMES));
+                double progress = (frame - returnStart) / (double) RETURN_FRAMES;
+                double target = interpolate(semantic, seatedBase, settleEase(progress));
+                double lift = approach.lift(joint);
+                if (lift > 0) {
+                    // Keep room to release lateral corrections before lowering
+                    // into the calibrated contact pose. Both ends are eased.
+                    target -= lift * settleEase(progress / .4) * settleEase((1 - progress) / .28);
+                }
+                return target;
             }
             int reclaspStart = reclaspStartFrame();
             if (frame < reclaspStart) {

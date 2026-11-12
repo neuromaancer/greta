@@ -291,6 +291,26 @@ public final class MeaningGestureTest {
                         && "restored".equals(direct.phaseNameAt(direct.restoreEndFrame())),
                 "direct endpoint uses the geometry solver's checked exact-rest branch");
         int nominalDirectEnd = direct.restoreEndFrame();
+        Map<String, Double> tabletopBase = new LinkedHashMap<String, Double>(wrist);
+        tabletopBase.put("l_shoulder_flexion", -55.0);
+        tabletopBase.put("r_shoulder_flexion", -55.0);
+        tabletopBase.put("l_elbow_flexion", -38.0);
+        tabletopBase.put("r_elbow_flexion", -38.0);
+        for (MeaningGesture.TabletopApproach profile : MeaningGesture.TabletopApproach.values()) {
+            require(direct.poseAt(directStart, tabletopBase, profile).equals(direct.poseAt(directStart, tabletopBase))
+                            && direct.poseAt(nominalDirectEnd, tabletopBase, profile).equals(tabletopBase),
+                    "tabletop approach preserves the final gesture and reaches the exact rest");
+            for (int frame = directStart; frame <= nominalDirectEnd; frame++) {
+                Map<String, Double> baseline = direct.poseAt(frame, tabletopBase);
+                Map<String, Double> approach = direct.poseAt(frame, tabletopBase, profile);
+                for (String joint : tabletopBase.keySet()) {
+                    double lift = baseline.get(joint) - approach.get(joint);
+                    require(lift >= 0 && lift <= profile.lift(joint),
+                            "tabletop approach keeps the handshape and bounded joint targets");
+                    if (frame == directStart + 30) require(lift == profile.lift(joint), "tabletop lift peaks mid-return");
+                }
+            }
+        }
         require(direct.extendDirectSettling(nominalDirectEnd)
                         && direct.restoreEndFrame() == nominalDirectEnd + 1
                         && direct.directSettleFrames() == 1,

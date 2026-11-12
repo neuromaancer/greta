@@ -153,6 +153,14 @@ penetration remains invalid, and forearms/upper arms retain their full padding.
 Cross-hand and body checks are unchanged. Other room configurations keep constant
 padding; the contact envelope requires separated direct-return resting hands.
 
+For those contact rests, hand safety checks the remaining direct return through
+exact rest before emitting its first frame. It tries the original target first,
+then eased approaches with a one-degree elbow lift or up to two degrees of
+shoulder lift if needed. The lift gives corrections room to release before the hands meet the table
+and is zero at both ends. Every approach uses the existing correction axes,
+rate limits, endpoint and sampled-path guards, and release-only settling budget.
+If no approach reaches exact rest, the replay stops with a diagnostic.
+
 These skeleton-derived proxies are conservative engineering approximations, not
 a skin/cloth mesh collision engine or a continuous geometric proof. Fine thumb
 contact and the naturalness of the adapted workspace still need visual review.
