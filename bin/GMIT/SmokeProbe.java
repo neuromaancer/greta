@@ -451,7 +451,7 @@ public final class SmokeProbe {
             for (String other : ACTORS) if (!other.equals(actor) && audio.get(other).size() != expected.get(other))
                 throw new IllegalStateException("Audio routed to wrong actor: " + other);
             if (audio.get(actor).size() > scheduled.get(actor)) throw new IllegalStateException("Duplicate audio for " + actor);
-            Thread.sleep(100);
+            Thread.sleep(meaningTurn ? 10 : 100);
         }
         assertAudioCounts(scheduled);
         Object a = audio.get(actor).get(expected.get(actor));
@@ -460,6 +460,7 @@ public final class SmokeProbe {
         // Greta Timer-domain schedule bounds, not a claim of physical speaker playback.
         long start = ((Number)call(a,"getTimeMillis")).longValue();
         long end = ((Number)call(a,"getEndMillis")).longValue();
+        if (meaningTurn) SeatedScene.bindMeaningTurn(actor, scenarioTurn.eventId, start, end);
         if (scenarioTurn != null && subtitles != null) {
             subtitles.schedule(scenarioTurn.sequence, scenarioTurn.eventId, scenarioTurn.actor, scenarioTurn.text,
                     scenarioTurn.sourceEventId, scenarioTurn.sourceTurn, scenarioTurn.chunkIndex,
@@ -473,7 +474,6 @@ public final class SmokeProbe {
         long gazeSeed = Long.getLong("gmit.gaze.seed", 711L).longValue()
                 ^ (scenarioTurn == null ? ordinal : scenarioTurn.eventId.hashCode());
         ListenerGaze.scheduleSpeech(actor, gazePeer, nextSpeaker, start, end, gazeSeed);
-        if (meaningTurn) SeatedScene.bindMeaningTurn(actor, scenarioTurn.eventId, start, end);
         Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         if (caption != null) caption.startSubtitleTicker(clock);
         long engineNow = ((Number)clock.invoke(null)).longValue();
