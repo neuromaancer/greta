@@ -107,18 +107,20 @@ The NetBeans profiles use their existing local CereProc route.
 
 Add `-MeaningMiner -VaryRestPoses` to the Windows PowerShell replay command
 to preview alternate seated arm rests. Hand safety must remain enabled.
-The first speaker begins in the calibrated tabletop pose. The other two
-begin in a raised crossed-hand pose and a mixed tabletop/thigh pose when
+The first speaker begins with both palms angled inward and fingers slightly
+curled. The other two begin in a low crossed-wrist pose and a mixed tabletop/thigh pose when
 their respective avatar has a calibrated path. After each utterance the
 speaker selects a supported rest other than its most recent rest.
 `-RestSeed 711` is the default and makes these choices reproducible.
 
-MeaningMiner retains the calibrated tabletop pose as its speech anchor.
+MeaningMiner retains the original palms-down tabletop pose as its speech anchor.
+The inward-facing tabletop rest has its own checked path to and from that anchor.
 Each alternate rest uses an avatar-specific reversible path with 30 steps.
 Startup checks the quantized arm/hand poses and intermediate samples
 against the hand, torso, upper-arm, and seated thigh proxies. The rest
 paths also use the stock round table's finite slab and leg bounds. The speech
 collision model and the ordinary replay path retain their existing defaults.
+The mixed rest rounds its interior waypoints and holds its calibrated endpoints.
 This preview calibrates crossed hands for all three actors and mixed rests
 for patients A and B. The both-hands-on-thighs rest still needs a checked path.
 These proxy checks complement visual inspection of the supported poses.
@@ -131,9 +133,9 @@ camera capture. It does not set the live replay interval. NetBeans keeps
 the ordinary replay behavior.
 
 The three-turn Jenny preview checked the opening rests, the facilitator's
-outgoing crossed rest, and both patients' return to the tabletop anchor before
-speech. The five alternate paths had positive sampled proxy margins. The
-smallest was approximately 0.26 mm. This run did not exercise every outgoing
+outgoing crossed rest, and the incoming transitions to the speech anchor.
+All configured paths passed the sampled proxy checks. The
+smallest margin was approximately 0.02 mm. This run did not exercise every outgoing
 rest or establish mesh-level collision clearance. Runtime deployment receipts
 remain under the ignored `bin/GMIT/local/` directory and can be passed to
 `integrations.gmit.deploy --rollback`.

@@ -13,6 +13,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import javax.imageio.ImageIO;
+import javax.imageio.IIOImage;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 
 /** Local, timestamped Ogre frames with pixel subtitles; encoding is external. */
 public final class ReplayVideo {
@@ -55,18 +59,37 @@ public final class ReplayVideo {
             throw new IllegalStateException("Video frame limit exceeded");
 
         BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0, i = 0; y < h; y++) for (int x = 0; x < w; x++, i += 3)
-            image.setRGB(x, y, ((rgb[i] & 255) << 16) | ((rgb[i + 1] & 255) << 8) | (rgb[i + 2] & 255));
+        int[] pixels = ((java.awt.image.DataBufferInt)image.getRaster().getDataBuffer()).getData();
+        for (int pixel = 0, i = 0; pixel < pixels.length; pixel++, i += 3)
+            pixels[pixel] = ((rgb[i] & 255) << 16) | ((rgb[i + 1] & 255) << 8) | (rgb[i + 2] & 255);
         draw(image, subtitle);
         String name = String.format(Locale.ROOT, "frame-%06d.png", frameRows.size() + 1);
-        if (!ImageIO.write(image, "png", new File(frames, name)))
-            throw new IllegalStateException("PNG encoder is unavailable");
+        writeFrame(image, new File(frames, name));
         width = w;
         height = h;
         lastFrame = timerMillis;
         captureEnd = timerMillis;
         frameRows.add("{\"file\":\"video-frames/" + name + "\",\"greta_timer_millis\":" + timerMillis + "}");
         if (frameRows.size() % 20 == 0) write(false);
+    }
+
+    private static void writeFrame(BufferedImage image, File file) throws Exception {
+        java.util.Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
+        if (!writers.hasNext()) throw new IllegalStateException("PNG encoder is unavailable");
+        ImageWriter writer = writers.next();
+        try (ImageOutputStream output = ImageIO.createImageOutputStream(file)) {
+            writer.setOutput(output);
+            ImageWriteParam parameters = writer.getDefaultWriteParam();
+            // Java 8's built-in PNG writer chooses its own compression.
+            // Newer writers allow a faster, still lossless capture setting.
+            if (parameters.canWriteCompressed()) {
+                parameters.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                parameters.setCompressionQuality(.85f);
+            }
+            writer.write(null, new IIOImage(image, null, null), parameters);
+        } finally {
+            writer.dispose();
+        }
     }
 
     public void audio(String event, String actor, String wav, long start, long end) throws Exception {

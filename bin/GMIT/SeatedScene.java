@@ -655,7 +655,8 @@ public final class SeatedScene {
                 restPaths.put(entry.getKey(), Collections.unmodifiableList(poses));
                 System.out.println("GMIT_REST calibrated actor=" + actor + " pose=" + entry.getKey() + " minimum_margin=" + minimum);
             }
-            restPaths.put("tabletop", Collections.singletonList(handBase));
+            if (!restPaths.containsKey("tabletop"))
+                restPaths.put("tabletop", Collections.singletonList(handBase));
         }
 
         private Map<String, Double> quantizedArmPose(Map<String, Double> pose, Constructor<?> bap, Class<?> types) throws Exception {
@@ -687,10 +688,11 @@ public final class SeatedScene {
         }
 
         private synchronized long moveToTabletop(String eventId) throws Exception {
-            if ("tabletop".equals(lastRest)) return 0;
-            List<Map<String, Double>> path = new ArrayList<>(restPaths.get(lastRest));
+            List<Map<String, Double>> planned = restPaths.get(lastRest);
+            if (planned.size() == 1) return 0;
+            List<Map<String, Double>> path = new ArrayList<>(planned);
             Collections.reverse(path);
-            return startRestMovement(eventId, "incoming", lastRest, "tabletop", path);
+            return startRestMovement(eventId, "incoming", lastRest, "speech-anchor", path);
         }
 
         private synchronized long chooseRest(String eventId) throws Exception {
@@ -700,7 +702,7 @@ public final class SeatedScene {
             String previous = lastRest;
             String selected = choices.get(restRandom.nextInt(choices.size()));
             List<Map<String, Double>> path = restPaths.get(selected);
-            long deadline = path.size() > 1 ? startRestMovement(eventId, "outgoing", "tabletop", selected, path) : 0;
+            long deadline = path.size() > 1 ? startRestMovement(eventId, "outgoing", "speech-anchor", selected, path) : 0;
             lastRest = selected;
             System.out.println("GMIT_REST selected actor=" + actor + " event=" + eventId + " prior=" + previous + " pose=" + lastRest);
             return deadline;
