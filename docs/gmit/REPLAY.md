@@ -83,6 +83,26 @@ Run arguments. Keep the complete runtime `bin` as Working Directory. The same
 parent/child cleanup limitations as [the group demo](GROUP_MI.md#run-modular-from-netbeans)
 apply if the IDE forcibly kills the parent process.
 
+## Azure Speech for patient B
+
+Pass `-AzurePython <absolute Windows python.exe>` to `Start-GMIT.ps1` with
+`-Replay` or `-GroupMI` to use `en-US-JennyNeural` for B. Use Python 3.10 or
+newer and install the Azure
+Speech SDK in that Python environment using the version in
+`bin/Common/Data/AzureTTS/requirements.txt`. Supply `SPEECH_KEY` and
+`SPEECH_REGION` together in the environment, or use the existing local
+`SPEECH_KEY.txt` and `SPEECH_REGION.txt` under the runtime's
+`bin/Common/Data/AzureTTS`. Set `GRETA_AZURE_CONFIG_DIR` to an absolute directory
+to read those files from elsewhere.
+
+This opt-in mode sends B's utterances to Azure Speech. Facilitator and A use
+their existing CereProc engines. One synthesis returns B's 48 kHz PCM audio,
+visemes, and named bookmarks. The replay uses those bookmarks for MeaningMiner
+anchors and the scheduled audio for subtitles and video export. Requests and
+their timing evidence are stored in the ignored run directory. A failed Azure
+request stops the replay. Omit the option for fully local CereProc playback.
+The NetBeans profiles use their existing local CereProc route.
+
 ## Local Pure backend
 
 The selected model is `qwen3:4b-instruct-2507-q4_K_M`. Its non-thinking Instruct

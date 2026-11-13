@@ -442,7 +442,8 @@ public final class SmokeProbe {
         if (scenarioTurn != null) log("scenario_event event_id=" + scenarioTurn.eventId + " source_sequence=" + scenarioTurn.sequence + " source_event_id=" + scenarioTurn.sourceEventId + " source_turn=" + scenarioTurn.sourceTurn + " chunk=" + scenarioTurn.chunkIndex + "/" + scenarioTurn.chunkCount + " stage=" + scenarioTurn.stage + " act=" + scenarioTurn.act);
         if (meaningTurn) MeaningMinerBridge.dispatch(actor, scenarioTurn.eventId);
         else call(objects.get(readerId), "load", new Class<?>[]{String.class}, bml.getPath());
-        long until = System.currentTimeMillis() + 10000;
+        long until = System.currentTimeMillis()
+                + ("patient-b".equals(actor) && System.getProperty("gmit.azure.python") != null ? 35000 : 10000);
         Map<String, Integer> scheduled = new HashMap<>(expected);
         scheduled.put(actor, expected.get(actor) + 1);
         while (audio.get(actor).size() == expected.get(actor) && System.currentTimeMillis() < until) {
@@ -642,10 +643,18 @@ public final class SmokeProbe {
             observeAudio(actor);
         }
         hideAutomaticReaderFrames();
-        // Distinguish the two Sarah speakers at synthesis time so patient B's
-        // generated audio and phoneme timings stay paired.
-        call(objects.get("gmit-patient-b-cereproc"), "setRateAndPitch",
-                new Class<?>[]{double.class, double.class}, 0.0, -17.0);
+        String azurePython = System.getProperty("gmit.azure.python");
+        if (azurePython != null) {
+            if (scenario == null || Boolean.getBoolean("gmit.preview"))
+                throw new IllegalArgumentException("Azure Speech requires a spoken GMIT scenario");
+            call(objects.get("gmit-patient-b-manager"), "setTTS",
+                    new Class<?>[]{greta.core.util.speech.TTS.class},
+                    new AzurePatientSpeech(azurePython, output.toPath()));
+            log("voice actor=patient-b backend=azure voice=en-US-JennyNeural");
+        } else {
+            call(objects.get("gmit-patient-b-cereproc"), "setRateAndPitch",
+                    new Class<?>[]{double.class, double.class}, 0.0, -17.0);
+        }
         boolean videoEnabled = Boolean.getBoolean("gmit.video.enabled");
         Caption caption = scenario == null || videoEnabled ? null : new Caption(scenario.title);
         if (scenario != null) { SeatedScene.install(objects); ListenerGaze.install(objects); }

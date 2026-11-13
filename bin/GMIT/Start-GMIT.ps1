@@ -3,6 +3,7 @@ param(
     [switch]$DisableListenerGaze, [switch]$DisableListenerNods, [switch]$DisableTabletopArms,
     [switch]$MeaningMiner, [switch]$DisableHandSafety,
     [switch]$Muted, [switch]$RecordVideo,
+    [string]$AzurePython,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
@@ -18,6 +19,12 @@ if ($RecordVideo -and ((-not ($GroupMI -or $Replay)) -or $Preview)) {
     throw '-RecordVideo requires a GroupMI/Replay run with speech.'
 }
 if ($Muted -and -not $automatic) { throw '-Muted requires an automatic Smoke/GroupMI/Replay run.' }
+if ($AzurePython) {
+    if ((-not ($GroupMI -or $Replay)) -or $Preview) { throw '-AzurePython requires a GroupMI/Replay run with speech.' }
+    if (-not [IO.Path]::IsPathRooted($AzurePython) -or -not (Test-Path -LiteralPath $AzurePython -PathType Leaf)) {
+        throw '-AzurePython must point to an absolute Windows Python executable with the Azure Speech SDK installed.'
+    }
+}
 if ($MeaningMiner -and ((-not ($GroupMI -or $Replay)) -or $DisableTabletopArms)) {
     throw 'MeaningMiner requires a seated GroupMI/Replay run with tabletop arms enabled.'
 }
@@ -83,6 +90,7 @@ $runTimeoutSeconds = 120 + $StartDelaySeconds + $EndHoldSeconds + $turnCount * (
 # and a conservative 9-second seated gesture return budget per turn. This
 # covers the 8.240-second bounded restore plus observation margin.
 if ($MeaningMiner) { $runTimeoutSeconds += 90 + $turnCount * (30 + 9) }
+if ($AzurePython) { $runTimeoutSeconds += 25 * $turnCount }
 $runPrefix = if ($GroupMI) { 'group-mi-' } elseif ($Replay) { 'replay-' } else { 'run-' }
 $run = Join-Path $PSScriptRoot ('local\' + $runPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $run | Out-Null
@@ -102,6 +110,7 @@ try {
         $compileArgs += @(('"' + (Join-Path $PSScriptRoot 'MeaningMinerBridge.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'MeaningGesture.java') + '"'), ('"' + (Join-Path $PSScriptRoot 'HandCollision.java') + '"'))
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplaySubtitles.java') + '"')
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplayVideo.java') + '"')
+        $compileArgs += ('"' + (Join-Path $PSScriptRoot 'AzurePatientSpeech.java') + '"')
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -127,6 +136,7 @@ try {
         if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }
         if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }
         if ($RecordVideo) { $arguments = @('-Dgmit.video.enabled=true') + $arguments }
+        if ($AzurePython) { $arguments = @(('"-Dgmit.azure.python=' + $AzurePython + '"')) + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }

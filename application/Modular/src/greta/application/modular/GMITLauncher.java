@@ -95,7 +95,8 @@ final class GMITLauncher {
                 helpers.resolve("SeatedScene.java").toString(), helpers.resolve("ListenerGaze.java").toString(),
                 helpers.resolve("GazeModiffAdapter.java").toString(), helpers.resolve("MeaningMinerBridge.java").toString(),
                 helpers.resolve("MeaningGesture.java").toString(), helpers.resolve("HandCollision.java").toString(),
-                helpers.resolve("ReplaySubtitles.java").toString(), helpers.resolve("ReplayVideo.java").toString()), bin, output, "compile", 30);
+                helpers.resolve("ReplaySubtitles.java").toString(), helpers.resolve("ReplayVideo.java").toString(),
+                helpers.resolve("AzurePatientSpeech.java").toString()), bin, output, "compile", 30);
         if (replay != null) {
             runOwned(Arrays.asList(java.toString(), "-cp", output + File.pathSeparator + System.getProperty("java.class.path"),
                     "SmokeProbe", "--validate", scenario.toString()), bin, output, "validate", 30);

@@ -8,6 +8,8 @@
     "bin/Examples/GMIT/facilitator-close.xml",
     "bin/Examples/GMIT/group-mi-red-meat.xml",
     "bin/GMIT/SmokeProbe.java",
+    "bin/GMIT/AzurePatientSpeech.java",
+    "integrations/gmit/azure_speech.py",
     "bin/GMIT/ReplaySubtitles.java",
     "bin/GMIT/ReplayVideo.java",
     "bin/GMIT/SeatedScene.java",
