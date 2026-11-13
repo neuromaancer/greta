@@ -642,6 +642,10 @@ public final class SmokeProbe {
             observeAudio(actor);
         }
         hideAutomaticReaderFrames();
+        // Distinguish the two Sarah speakers at synthesis time so patient B's
+        // generated audio and phoneme timings stay paired.
+        call(objects.get("gmit-patient-b-cereproc"), "setRateAndPitch",
+                new Class<?>[]{double.class, double.class}, 0.0, -17.0);
         boolean videoEnabled = Boolean.getBoolean("gmit.video.enabled");
         Caption caption = scenario == null || videoEnabled ? null : new Caption(scenario.title);
         if (scenario != null) { SeatedScene.install(objects); ListenerGaze.install(objects); }

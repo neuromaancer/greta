@@ -34,11 +34,13 @@ this runtime does not expose their frames to the probe for hiding.
 | --- | --- | --- | --- |
 | Center | Facilitator | LENA | English Sarah |
 | Left | Alex, patient A | EDDY | English William |
-| Right | Sam, patient B | LAURA | English Sarah |
+| Right | Sam, patient B | LAURA | English Sarah, with adjusted prosody in automatic playback |
 
-The facilitator and Sam share a voice configuration but retain independent
-speech, lip, audio, and animation chains. Their position and captions distinguish
-them. Avatar resources, blinking, and runtime JARs come from the accepted P1
+Automatic playback lowers Sam's pitch by 17% at synthesis time so the lip
+animation follows the resulting phoneme timings. The manual readers use the
+standard Sarah voice. Existing recordings retain their captured voice settings.
+The three speakers have independent speech, lip, audio, and animation chains.
+Avatar resources, blinking, and runtime JARs come from the accepted P1
 setup. Group playback adds its room and seated pose to the existing graph
 without replacing the Environment root.
 

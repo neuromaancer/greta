@@ -199,7 +199,7 @@ remain unverified. No checkpoint or model was loaded or downloaded.
 | --- | --- | --- | --- |
 | `facilitator` | LENA / English Sarah | 0 | `gmit-facilitator-open-reader`, `gmit-facilitator-close-reader` |
 | `patient-a` | EDDY / English William | -0.75 | `gmit-patient-a-reader` |
-| `patient-b` | LAURA / English Sarah | +0.75 | `gmit-patient-b-reader` |
+| `patient-b` | LAURA / English Sarah with a 17% pitch reduction in automatic playback | +0.75 | `gmit-patient-b-reader` |
 
 All three CharacterManagers share one Environment. Each has independent
 Realizer, TTS, CereProc, body, face, lip model/blender, audio, and MPEG4 avatar.
