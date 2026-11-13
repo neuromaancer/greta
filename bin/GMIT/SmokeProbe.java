@@ -403,6 +403,58 @@ public final class SmokeProbe {
         video.frame(w,h,rgb,now,subtitles == null ? "" : subtitles.textAt(now));
     }
     private static void recordVideoFrame() throws Exception { if (video != null) recordVideoFrame(videoClock); }
+    /** Keep API-scheduled rest transitions observable in Greta Timer time. */
+    private static void observeRest(long deadline, Method clock, Caption caption,
+                                    Map<String, Integer> expected) throws Exception {
+        if (deadline == 0) return;
+        long now = ((Number)clock.invoke(null)).longValue();
+        if (deadline <= now) {
+            recordVideoFrame(clock);
+            assertAudioCounts(expected);
+            SeatedScene.verifyPose();
+            log("rest_observed deadline_greta_ms=" + deadline + " actual_greta_ms=" + now
+                    + " already_elapsed=true");
+            return;
+        }
+        long watchdog = System.currentTimeMillis() + (deadline - now) + MEANING_WATCHDOG_GRACE_MILLIS;
+        while (((Number)clock.invoke(null)).longValue() < deadline) {
+            if (caption != null) caption.checkCancelled();
+            if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
+            if (System.currentTimeMillis() > watchdog) throw new IllegalStateException("Greta rest clock stopped progressing");
+            assertAudioCounts(expected);
+            SeatedScene.observeMeaningGesture();
+            SeatedScene.checkHealthy();
+            recordVideoFrame(clock);
+            Thread.sleep(video == null ? 40 : 10);
+        }
+        // Preserve a final source frame for local timing edits.
+        recordVideoFrame(clock);
+        assertAudioCounts(expected);
+        SeatedScene.verifyPose();
+        log("rest_observed deadline_greta_ms=" + deadline
+                + " actual_greta_ms=" + ((Number)clock.invoke(null)).longValue());
+    }
+    /** Keep the pre-first-turn opening pose in the recording before it moves. */
+    private static void preserveOpeningFrame(Method clock, Caption caption,
+                                             Map<String, Integer> expected) throws Exception {
+        long first = ((Number)clock.invoke(null)).longValue();
+        long deadline = first + 600;
+        long watchdog = System.currentTimeMillis() + 1600;
+        recordVideoFrame(clock);
+        while (((Number)clock.invoke(null)).longValue() < deadline) {
+            if (caption != null) caption.checkCancelled();
+            if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
+            if (System.currentTimeMillis() > watchdog) throw new IllegalStateException("Greta opening clock stopped progressing");
+            assertAudioCounts(expected);
+            SeatedScene.observeMeaningGesture();
+            SeatedScene.checkHealthy();
+            recordVideoFrame(clock);
+            Thread.sleep(video == null ? 40 : 10);
+        }
+        recordVideoFrame(clock);
+        log("opening_frame_preserved elapsed_greta_ms="
+                + (((Number)clock.invoke(null)).longValue() - first));
+    }
     private static void observeAudio(final String actor) throws Exception {
         audio.put(actor, new CopyOnWriteArrayList<>());
         Object performer = objects.get("gmit-" + actor + "-audio");
@@ -434,7 +486,11 @@ public final class SmokeProbe {
                                  String nextSpeaker) throws Exception {
         assertAudioCounts(expected);
         if (caption != null) caption.checkCancelled();
-        recordVideoFrame();
+        Method clock = objects.get("gmit-player").getClass().getClassLoader()
+                .loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
+        recordVideoFrame(clock);
+        if (scenarioTurn != null)
+            observeRest(SeatedScene.prepareRestForSpeech(actor, scenarioTurn.eventId), clock, caption, expected);
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
         boolean meaningTurn = scenarioTurn != null && meaningPlans.contains(scenarioTurn.eventId);
         log("dispatch sequence=" + ordinal + " actor=" + actor + " route="
@@ -475,7 +531,6 @@ public final class SmokeProbe {
         long gazeSeed = Long.getLong("gmit.gaze.seed", 711L).longValue()
                 ^ (scenarioTurn == null ? ordinal : scenarioTurn.eventId.hashCode());
         ListenerGaze.scheduleSpeech(actor, gazePeer, nextSpeaker, start, end, gazeSeed);
-        Method clock = a.getClass().getClassLoader().loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         if (caption != null) caption.startSubtitleTicker(clock);
         long engineNow = ((Number)clock.invoke(null)).longValue();
         long remaining = end-engineNow;
@@ -527,6 +582,8 @@ public final class SmokeProbe {
             SeatedScene.finishMeaningTurn(actor, scenarioTurn.eventId);
         }
         log("schedule_elapsed sequence="+ordinal+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
+        if (scenarioTurn != null)
+            observeRest(SeatedScene.chooseRestAfterSpeech(actor, scenarioTurn.eventId), clock, caption, expected);
     }
 
     /** Alternate valid listener targets across successive speaking turns. */
@@ -679,6 +736,7 @@ public final class SmokeProbe {
             }
             log("meaningminer_prepared turns=" + meaningPlans.size() + " actors=3"
                     + " dialogue_changed=false speech_generated=false");
+            SeatedScene.setOpeningRests(scenario.turns.get(0).actor);
         }
         Thread.sleep(2000);
         SeatedScene.verifyPose();
@@ -712,6 +770,8 @@ public final class SmokeProbe {
             recordVideoFrame(videoClock);
         }
         Map<String,Integer> expected = new HashMap<>(); for (String actor : ACTORS) expected.put(actor, 0);
+        if (scenario != null && video != null && Boolean.getBoolean("gmit.rest.variation"))
+            preserveOpeningFrame(videoClock, caption, expected);
         String scenarioOrder = null;
         try {
             if (scenario == null) {

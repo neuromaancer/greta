@@ -108,6 +108,13 @@ public final class HandCollision {
                     new TableContactRest(calibratedRest, releaseDistance));
         }
 
+        /** Use the calibrated round table's finite top and four leg boxes for rest motion only. */
+        Model withRoundTableRestBoundary() {
+            if (boundaries == null || boundaries.table == null)
+                throw new IllegalStateException("A seated table boundary is required");
+            return new Model(bones, mappers, fixedPose, boundaries.withRoundTable(), tableContactRest);
+        }
+
         /** Evaluates a degree-valued BAP pose without accessing native Ogre state. */
         public Metrics measure(Map<String, Double> degrees) {
             degrees = resolvedPose(degrees);
@@ -178,6 +185,19 @@ public final class HandCollision {
                     if (movingSegment != leftForearmSegment) upper = Math.min(upper, segmentDistance(movingSegment.segment.start, movingSegment.segment.end, leftArm, leftForearm) - movingSegment.radius - upperRadius);
                     if (movingSegment != rightForearmSegment) upper = Math.min(upper, segmentDistance(movingSegment.segment.start, movingSegment.segment.end, rightArm, rightForearm) - movingSegment.radius - upperRadius);
                 }
+                if (active.table != null && active.table.roundRest) {
+                    for (String side : new String[] {"Left", "Right"}) {
+                        Vec hip = position(side + "UpLeg", degrees, world);
+                        Vec knee = position(side + "Leg", degrees, world);
+                        Vec axis = knee.sub(hip);
+                        // Taper the thigh proxy toward the knee. The two
+                        // capsules cover the cloth where a hand can settle.
+                        torso = Math.min(torso, thighClearance(moving, hip.add(axis.scale(.10)),
+                                hip.add(axis.scale(.58)), .075));
+                        torso = Math.min(torso, thighClearance(moving, hip.add(axis.scale(.58)),
+                                hip.add(axis.scale(.92)), .060));
+                    }
+                }
                 // The shoulder attachment is adjacent to the torso by design;
                 // trim only that proximal eighth before checking the remaining
                 // upper-arm volume against the torso capsule chain.
@@ -202,6 +222,15 @@ public final class HandCollision {
                 upperTable = Math.min(upperTable, active.table.clearance(active.toWorld(rightArm), active.toWorld(rightForearm), upperRadius + active.tableMargin));
             }
             return new BoundaryMetrics(torso, upper, table, upperTorso, upperTable);
+        }
+
+        private static double thighClearance(List<BoundarySegment> arm, Vec start, Vec end, double radius) {
+            double clearance = Double.POSITIVE_INFINITY;
+            for (BoundarySegment segment : arm) {
+                clearance = Math.min(clearance, segmentDistance(segment.segment.start, segment.segment.end,
+                        start, end) - segment.radius - radius);
+            }
+            return clearance;
         }
 
         private double tableMargin(Boundaries active, Map<String, Vec> points, String side) {
@@ -791,6 +820,11 @@ public final class HandCollision {
         public PathMargin pathMarginBoundary(Map<String, Double> previous, Map<String, Double> next) {
             return pathMargins(previous, next, -Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE).boundary;
         }
+
+        double pathMarginAll(Map<String, Double> previous, Map<String, Double> next, double clearance, double palmClearance) {
+            PathMargins margins = pathMargins(previous, next, clearance, clearance, palmClearance, palmClearance);
+            return Math.min(margins.boundary.minimumMargin, Math.min(margins.existing.minimumMargin, margins.fingerPalm.minimumMargin));
+        }
         private boolean safePath(Map<String, Double> previous, Map<String, Double> next, double previousClearance, double clearance, double previousFingerPalmClearance, double fingerPalmClearance) {
             PathMargins margins = pathMargins(previous, next, previousClearance, clearance, previousFingerPalmClearance, fingerPalmClearance);
             return margins.existing.safe() && margins.fingerPalm.safe() && margins.boundary.safe();
@@ -884,17 +918,63 @@ public final class HandCollision {
         }
         boolean enabled() { return bodyEnabled || table != null; }
         Vec toWorld(Vec local) { return new Vec(local.x + worldX, local.y + worldY, local.z + worldZ); }
+        Boundaries withRoundTable() {
+            return new Boundaries(new Tabletop(table.minimumX, table.maximumX, table.minimumZ, table.maximumZ,
+                    table.topY, true), bodyEnabled, worldX, worldY, worldZ, torsoMargin, upperArmMargin, tableMargin);
+        }
     }
     private static final class Tabletop implements Serializable {
         private static final long serialVersionUID = 1L;
         final double minimumX, maximumX, minimumZ, maximumZ, topY;
-        Tabletop(double minimumX,double maximumX,double minimumZ,double maximumZ,double topY){this.minimumX=minimumX;this.maximumX=maximumX;this.minimumZ=minimumZ;this.maximumZ=maximumZ;this.topY=topY;}
+        final boolean roundRest;
+        // Bounds of the four leg meshes, in table.mesh local coordinates.
+        private static final double[][] LEGS = {
+                {.17019, .23883, 1.05269, 1.122}, {.57793, .64658, .17828, .24692},
+                {1.04802, 1.11666, 1.45902, 1.52767}, {1.45461, 1.52326, .58708, .65572}
+        };
+        Tabletop(double minimumX,double maximumX,double minimumZ,double maximumZ,double topY){
+            this(minimumX, maximumX, minimumZ, maximumZ, topY, false);
+        }
+        Tabletop(double minimumX,double maximumX,double minimumZ,double maximumZ,double topY,boolean roundRest){
+            this.minimumX=minimumX;this.maximumX=maximumX;this.minimumZ=minimumZ;this.maximumZ=maximumZ;this.topY=topY;
+            this.roundRest=roundRest;
+            if (roundRest && (Math.abs(maximumX - minimumX - 1.6976) > .0001
+                    || Math.abs(maximumZ - minimumZ - 1.6976) > .0001 || Math.abs(topY - .7078) > .0001))
+                throw new IllegalArgumentException("Round-table rest boundary requires the calibrated stock table dimensions");
+        }
         /** Surface clearance above the finite rectangular tabletop; its edge is deliberately not treated as mesh geometry. */
         double clearance(Vec start, Vec end, double radius) {
+            if (roundRest) return finiteTableClearance(start, end, radius);
             double[] interval = projectedInterval(start.x, end.x, start.z, end.z, minimumX - radius, maximumX + radius, minimumZ - radius, maximumZ + radius);
             if (interval == null) return Double.POSITIVE_INFINITY;
             double y0 = start.y + (end.y - start.y) * interval[0], y1 = start.y + (end.y - start.y) * interval[1];
             return Math.min(y0, y1) - topY - radius;
+        }
+        private double finiteTableClearance(Vec start, Vec end, double radius) {
+            double x = start.x - (minimumX + maximumX) * .5, z = start.z - (minimumZ + maximumZ) * .5;
+            double dx = end.x - start.x, dz = end.z - start.z;
+            double diskRadius = .84884 + radius;
+            double a = dx * dx + dz * dz, b = x * dx + z * dz, c = x * x + z * z - diskRadius * diskRadius;
+            double margin = Double.POSITIVE_INFINITY;
+            if (a < EPSILON) {
+                if (c <= 0) margin = verticalClearance(start, end, 0, 1, .67130 - radius, topY + radius);
+            } else if (b * b - a * c >= 0) {
+                double root = Math.sqrt(b * b - a * c);
+                double low = Math.max(0, (-b - root) / a), high = Math.min(1, (-b + root) / a);
+                if (low <= high) margin = verticalClearance(start, end, low, high, .67130 - radius, topY + radius);
+            }
+            for (double[] leg : LEGS) {
+                double[] interval = projectedInterval(start.x, end.x, start.z, end.z,
+                        minimumX + leg[0] - radius, minimumX + leg[1] + radius,
+                        minimumZ + leg[2] - radius, minimumZ + leg[3] + radius);
+                if (interval != null)
+                    margin = Math.min(margin, verticalClearance(start, end, interval[0], interval[1], -radius, .69384 + radius));
+            }
+            return margin;
+        }
+        private static double verticalClearance(Vec start, Vec end, double low, double high, double bottom, double top) {
+            double first = start.y + (end.y - start.y) * low, last = start.y + (end.y - start.y) * high;
+            return Math.max(Math.min(first, last) - top, bottom - Math.max(first, last));
         }
         private static double[] projectedInterval(double x0,double x1,double z0,double z1,double minX,double maxX,double minZ,double maxZ) {
             double[] interval = new double[] {0,1};

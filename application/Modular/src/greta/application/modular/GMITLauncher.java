@@ -68,7 +68,7 @@ final class GMITLauncher {
         Path scene = bin.resolve("Configurations/Greta/GMIT/GMIT - 3 characters - CereProc.xml");
         Path scenario = replay == null ? bin.resolve("Examples/GMIT/group-mi-red-meat.xml") : replay;
         for (Path required : Arrays.asList(bin.resolve("Modular.jar"), scene, scenario,
-                helpers.resolve("SmokeProbe.java"), helpers.resolve("SeatedScene.java"),
+                helpers.resolve("SmokeProbe.java"), helpers.resolve("SeatedScene.java"), helpers.resolve("SeatedRestPoseLibrary.java"),
                 helpers.resolve("ReplaySubtitles.java"),
                 helpers.resolve("ReplayVideo.java"),
                 helpers.resolve("ListenerGaze.java"), helpers.resolve("GazeModiffAdapter.java"),
@@ -96,7 +96,7 @@ final class GMITLauncher {
                 helpers.resolve("GazeModiffAdapter.java").toString(), helpers.resolve("MeaningMinerBridge.java").toString(),
                 helpers.resolve("MeaningGesture.java").toString(), helpers.resolve("HandCollision.java").toString(),
                 helpers.resolve("ReplaySubtitles.java").toString(), helpers.resolve("ReplayVideo.java").toString(),
-                helpers.resolve("AzurePatientSpeech.java").toString()), bin, output, "compile", 30);
+                helpers.resolve("AzurePatientSpeech.java").toString(), helpers.resolve("SeatedRestPoseLibrary.java").toString()), bin, output, "compile", 30);
         if (replay != null) {
             runOwned(Arrays.asList(java.toString(), "-cp", output + File.pathSeparator + System.getProperty("java.class.path"),
                     "SmokeProbe", "--validate", scenario.toString()), bin, output, "validate", 30);

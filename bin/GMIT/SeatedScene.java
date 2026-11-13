@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
@@ -35,6 +36,8 @@ public final class SeatedScene {
     private static final boolean ARMS = Boolean.parseBoolean(System.getProperty("gmit.pose.arms", "true"));
     private static final boolean MEANING_GESTURES = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.enabled", "false"));
     private static final boolean HAND_SAFETY = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.handSafety", "true"));
+    private static final boolean REST_VARIATION = Boolean.getBoolean("gmit.rest.variation");
+    private static final int REST_FRAMES = SeatedRestPoseLibrary.FRAMES;
     private static final int ARM_LOOKAHEAD_FRAMES = 25; // One second; diagnostic render capture can exceed the 100 ms pump cadence.
     private static final List<PoseController> CONTROLLERS = new ArrayList<PoseController>();
     private static volatile boolean installed;
@@ -45,6 +48,8 @@ public final class SeatedScene {
 
     public static synchronized void install(Map<String, Object> objects) throws Exception {
         if (installed) throw new IllegalStateException("Seated scene is already installed");
+        if (REST_VARIATION && (!ARMS || !MEANING_GESTURES || !HAND_SAFETY))
+            throw new IllegalArgumentException("Rest variation requires seated MeaningMiner and hand safety");
         poseFailure = null;
         RoomLayout layout = readRoom(new File(ROOM_FILE));
         addRoom(require(objects, "gmit-environment"), layout.root);
@@ -172,6 +177,26 @@ public final class SeatedScene {
     public static synchronized void observeMeaningGesture() throws Exception {
         if (!MEANING_GESTURES || !installed) return;
         for (PoseController controller : CONTROLLERS) controller.observeMeaningGesture();
+    }
+
+    /** The first speaker uses the tabletop anchor; the two listeners start differently. */
+    public static synchronized void setOpeningRests(String firstSpeaker) throws Exception {
+        if (!REST_VARIATION) return;
+        controller(firstSpeaker); // Validate the actor before changing any pose.
+        String[] listenerRests = {"stacked", "mixed"};
+        int next = 0;
+        for (PoseController controller : CONTROLLERS) {
+            String rest = controller.actor.equals(firstSpeaker) ? "tabletop" : listenerRests[next++];
+            controller.setOpeningRest(rest);
+        }
+    }
+
+    public static synchronized long prepareRestForSpeech(String actor, String eventId) throws Exception {
+        return REST_VARIATION ? controller(actor).moveToTabletop(eventId) : 0;
+    }
+
+    public static synchronized long chooseRestAfterSpeech(String actor, String eventId) throws Exception {
+        return REST_VARIATION ? controller(actor).chooseRest(eventId) : 0;
     }
 
     private static PoseController controller(String actor) {
@@ -468,8 +493,16 @@ public final class SeatedScene {
         private boolean observedMeaningBodyMaskFilter;
         private boolean observedMeaningPending;
         private HandCollision.Model handModel;
+        private HandCollision.Model restModel;
         private double handClearance, handContact, fingerPalmContact;
         private Map<String, Double> handBase;
+        private final Map<String, List<Map<String, Double>>> restPaths = new LinkedHashMap<>();
+        private final Random restRandom;
+        private String lastRest = "tabletop";
+        private Map<String, Double> idleRest;
+        private List<Map<String, Double>> restMovement = Collections.emptyList();
+        private int restMovementStart;
+        private int lastVerifiedRestFrame = -1;
         private final Map<List<Object>, HandCollision.Result> projectionMemo = new LinkedHashMap<List<Object>, HandCollision.Result>(512, .75f, true) {
             @Override protected boolean removeEldestEntry(Map.Entry<List<Object>, HandCollision.Result> eldest) { return size() > 512; }
         };
@@ -543,6 +576,7 @@ public final class SeatedScene {
                 snapshotFile.writeObject(handModel);
             }
             prepareOpening();
+            if (REST_VARIATION) prepareRestPaths();
             System.out.println("GMIT_HAND_SAFETY ready actor=" + actor + " clearance_native_units=" + handClearance);
         }
 
@@ -583,6 +617,120 @@ public final class SeatedScene {
 
         PoseController(String actor, PoseSpec pose, double[] table, Object avatar, Object body) {
             this.actor = actor; this.pose = pose; this.table = table.clone(); this.avatar = avatar; this.body = body; this.loader = avatar.getClass().getClassLoader();
+            this.restRandom = new Random(Long.getLong("gmit.rest.seed", 711L).longValue() ^ actor.hashCode());
+        }
+
+        private void prepareRestPaths() throws Exception {
+            restModel = handModel.withRoundTableRestBoundary();
+            Constructor<?> bap = loader.loadClass("greta.core.animation.mpeg4.bap.BAPFrame").getConstructor(Integer.TYPE);
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            for (Map.Entry<String, List<Map<String, Double>>> entry : SeatedRestPoseLibrary.paths(actor, handBase).entrySet()) {
+                List<Map<String, Double>> poses = new ArrayList<>();
+                for (Map<String, Double> partial : entry.getValue()) {
+                    if (!ARM_JOINTS.containsAll(partial.keySet()))
+                        throw new IllegalArgumentException("Unexpected arm channel in rest " + entry.getKey());
+                    Map<String, Double> full = new LinkedHashMap<>(handBase);
+                    full.putAll(partial);
+                    poses.add(Collections.unmodifiableMap(full));
+                }
+                if (poses.size() != REST_FRAMES + 1 || !sameArmPose(handBase, poses.get(0)))
+                    throw new IllegalArgumentException("Rest path must start at tabletop and contain 30 steps");
+                Map<String, Double> previous = quantizedArmPose(poses.get(0), bap, types);
+                double minimum = restMargin(previous);
+                for (int index = 1; index < poses.size(); index++) {
+                    Map<String, Double> current = poses.get(index);
+                    Map<String, Double> quantized = quantizedArmPose(current, bap, types);
+                    for (String joint : ARM_JOINTS) {
+                        double target = current.get(joint).doubleValue();
+                        if (!Double.isFinite(target) || Math.abs(target) > 180
+                                || Math.abs(quantized.get(joint).doubleValue() - previous.get(joint).doubleValue()) > 6)
+                            throw new IllegalStateException("Invalid rest motion actor=" + actor + " pose=" + entry.getKey() + " joint=" + joint);
+                    }
+                    minimum = Math.min(minimum, restMargin(quantized));
+                    minimum = Math.min(minimum, restModel.pathMarginAll(previous, quantized, handClearance, handClearance));
+                    previous = quantized;
+                }
+                if (!(minimum >= -1e-8))
+                    throw new IllegalStateException("Rest path clearance failed actor=" + actor + " pose=" + entry.getKey() + " minimum=" + minimum);
+                restPaths.put(entry.getKey(), Collections.unmodifiableList(poses));
+                System.out.println("GMIT_REST calibrated actor=" + actor + " pose=" + entry.getKey() + " minimum_margin=" + minimum);
+            }
+            restPaths.put("tabletop", Collections.singletonList(handBase));
+        }
+
+        private Map<String, Double> quantizedArmPose(Map<String, Double> pose, Constructor<?> bap, Class<?> types) throws Exception {
+            Object frame = bap.newInstance(0);
+            for (String joint : ARM_JOINTS) setDegrees(frame, types, joint, pose.get(joint).doubleValue());
+            return readArmPose(frame, types);
+        }
+
+        private Map<String, Double> readArmPose(Object frame, Class<?> types) throws Exception {
+            Map<String, Double> values = new LinkedHashMap<>();
+            for (String joint : ARM_JOINTS) values.put(joint, Double.valueOf(degree(frame, types, joint)));
+            return values;
+        }
+
+        private double restMargin(Map<String, Double> values) {
+            HandCollision.Metrics metrics = restModel.measure(values);
+            return Math.min(metrics.boundaryMinimum(), Math.min(metrics.minimum(), metrics.fingerPalm) - handClearance);
+        }
+
+        private synchronized void setOpeningRest(String rest) throws Exception {
+            List<Map<String, Double>> path = restPaths.get(rest);
+            if (path == null) throw new IllegalStateException("Missing opening rest " + rest + " for " + actor);
+            lastRest = rest;
+            idleRest = path.get(path.size() - 1);
+            restMovementStart = currentFrame() + 2;
+            restMovement = Collections.singletonList(idleRest);
+            emitRestFrames(restMovement, restMovementStart);
+            System.out.println("GMIT_REST opening actor=" + actor + " pose=" + rest);
+        }
+
+        private synchronized long moveToTabletop(String eventId) throws Exception {
+            if ("tabletop".equals(lastRest)) return 0;
+            List<Map<String, Double>> path = new ArrayList<>(restPaths.get(lastRest));
+            Collections.reverse(path);
+            return startRestMovement(eventId, "incoming", lastRest, "tabletop", path);
+        }
+
+        private synchronized long chooseRest(String eventId) throws Exception {
+            List<String> choices = new ArrayList<>(restPaths.keySet());
+            choices.remove(lastRest);
+            Collections.sort(choices);
+            String previous = lastRest;
+            String selected = choices.get(restRandom.nextInt(choices.size()));
+            List<Map<String, Double>> path = restPaths.get(selected);
+            long deadline = path.size() > 1 ? startRestMovement(eventId, "outgoing", "tabletop", selected, path) : 0;
+            lastRest = selected;
+            System.out.println("GMIT_REST selected actor=" + actor + " event=" + eventId + " prior=" + previous + " pose=" + lastRest);
+            return deadline;
+        }
+
+        private long startRestMovement(String eventId, String phase, String from, String to,
+                                        List<Map<String, Double>> path) throws Exception {
+            int now = currentFrame();
+            if (meaningTurn != null || (!restMovement.isEmpty() && now < restMovementStart + restMovement.size() - 1))
+                throw new IllegalStateException("Arm motion still active for " + actor);
+            restMovementStart = now + 2;
+            restMovement = path;
+            idleRest = path.get(path.size() - 1);
+            emitRestFrames(path, restMovementStart);
+            int end = restMovementStart + path.size() - 1;
+            System.out.println("GMIT_REST transition actor=" + actor + " event=" + eventId + " phase=" + phase
+                    + " from=" + from + " to=" + to + " start_frame=" + restMovementStart + " end_frame=" + end);
+            return (end + 1L) * MeaningGesture.FRAME_MILLIS;
+        }
+
+        private void emitRestFrames(List<Map<String, Double>> poses, int firstFrame) throws Exception {
+            Constructor<?> constructor = loader.loadClass("greta.core.animation.mpeg4.bap.BAPFrame").getConstructor(Integer.TYPE);
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            List<Object> frames = new ArrayList<>();
+            for (Map<String, Double> pose : poses) {
+                Object frame = constructor.newInstance(firstFrame + frames.size());
+                for (String joint : ARM_JOINTS) setDegrees(frame, types, joint, pose.get(joint).doubleValue());
+                frames.add(frame);
+            }
+            invoke(avatar, "performBAPFrames", frames, newID());
         }
 
         /* Root translations are absolute in MPEG4Agent, so only BAP owns placement. */
@@ -662,6 +810,7 @@ public final class SeatedScene {
                 throw new IllegalStateException("Meaning gesture is already active for " + actor);
             meaningTurn = new MeaningGesture.Turn(actor, eventId, seatedGestureGain(), pose.gestureOffsets, pose.style, pose.releaseLead);
             meaningTurn.setDirectReturn(pose.directReturn);
+            if (REST_VARIATION && pose.directReturn) meaningTurn.setDirectReturnFrames(REST_FRAMES);
             if (HAND_SAFETY) meaningTurn.setHandReturnPath(handOpeningPath, handOpeningWeights);
             checkedReturn = Collections.emptyMap();
             returnApproach = MeaningGesture.TabletopApproach.DIRECT;
@@ -693,7 +842,10 @@ public final class SeatedScene {
 
         synchronized void observeMeaningGesture() throws Exception {
             MeaningGesture.Turn turn = meaningTurn;
-            if (turn == null || !turn.isBound()) return;
+            if (turn == null || !turn.isBound()) {
+                if (turn == null && !restMovement.isEmpty()) observeRestPose();
+                return;
+            }
             // Keep a bounded future window alive even when the Realizer stops
             // sending body frames during a hold or the return to the clasp.
             replayCapturedArms(turn, false);
@@ -733,6 +885,19 @@ public final class SeatedScene {
                 System.out.println("GMIT_MEANING_GESTURE restored actor=" + actor + " event=" + turn.eventId + " frame=" + frameNumber);
                 observedMeaningRestored = true;
             }
+        }
+
+        private void observeRestPose() throws Exception {
+            Object current = SeatedScene.invoke(avatar, "getCurrentBAPFrame");
+            Object frame = current.getClass().getMethod("clone").invoke(current);
+            int frameNumber = ((Number)invoke(frame, "getFrameNumber")).intValue();
+            if (frameNumber < restMovementStart || frameNumber == lastVerifiedRestFrame) return;
+            Class<?> types = loader.loadClass("greta.core.animation.mpeg4.bap.BAPType");
+            assertStaticArms(frame, types);
+            double margin = restMargin(readArmPose(frame, types));
+            if (!(margin >= -1e-8))
+                throw new IllegalStateException("Observed unsafe rest motion actor=" + actor + " frame=" + frameNumber + " margin=" + margin);
+            lastVerifiedRestFrame = frameNumber;
         }
 
         synchronized long meaningRestoreMillis(String eventId) {
@@ -1090,6 +1255,11 @@ public final class SeatedScene {
                     poses.toString().getBytes(StandardCharsets.UTF_8));
         }
         private void applyStaticArms(Object frame, Class<?> types) throws Exception {
+            if (idleRest != null) {
+                Map<String, Double> expected = restPoseAt(((Number)invoke(frame, "getFrameNumber")).intValue());
+                for (String joint : ARM_JOINTS) setDegrees(frame, types, joint, expected.get(joint).doubleValue());
+                return;
+            }
             setDegrees(frame, types, "l_shoulder_flexion", pose.lShoulderFlexion); setDegrees(frame, types, "r_shoulder_flexion", pose.rShoulderFlexion);
             setDegrees(frame, types, "l_shoulder_abduct", pose.lShoulderAbduct); setDegrees(frame, types, "r_shoulder_abduct", pose.rShoulderAbduct);
             setDegrees(frame, types, "l_elbow_flexion", pose.lElbowFlexion); setDegrees(frame, types, "r_elbow_flexion", pose.rElbowFlexion);
@@ -1100,6 +1270,14 @@ public final class SeatedScene {
             for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) setDegrees(frame, types, override.getKey(), override.getValue().doubleValue());
         }
         private void assertStaticArms(Object frame, Class<?> types) throws Exception {
+            if (idleRest != null) {
+                Map<String, Double> expected = restPoseAt(((Number)invoke(frame, "getFrameNumber")).intValue());
+                for (String joint : ARM_JOINTS) {
+                    assertMask(frame, types, joint);
+                    assertDegrees(frame, types, joint, expected.get(joint).doubleValue());
+                }
+                return;
+            }
             assertArm(frame, types, "l_shoulder_flexion", pose.lShoulderFlexion);
             assertArm(frame, types, "l_elbow_flexion", pose.lElbowFlexion);
             assertArm(frame, types, "l_elbow_twisting", pose.lElbowTwisting);
@@ -1111,6 +1289,12 @@ public final class SeatedScene {
             assertArm(frame, types, "r_wrist_pivot", pose.rWristPivot);
             assertArm(frame, types, "r_wrist_twisting", pose.rWristTwisting);
             for (Map.Entry<String, Double> override : pose.armOverrides.entrySet()) assertArm(frame, types, override.getKey(), override.getValue().doubleValue());
+        }
+
+        private Map<String, Double> restPoseAt(int frame) {
+            if (restMovement.isEmpty()) return idleRest;
+            int index = Math.max(0, frame - restMovementStart);
+            return restMovement.get(Math.min(index, restMovement.size() - 1));
         }
         private void captureMeaningArms(Object frame) throws Exception {
             MeaningGesture.Turn turn = meaningTurn;

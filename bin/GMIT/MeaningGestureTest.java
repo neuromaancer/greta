@@ -344,6 +344,16 @@ public final class MeaningGestureTest {
         boolean returnModeLocked = false;
         try { direct.setDirectReturn(false); } catch (IllegalStateException expected) { returnModeLocked = true; }
         require(returnModeLocked, "return mode cannot change after audio binding");
+        MeaningGesture.Turn quickReturn = new MeaningGesture.Turn("patient-b", "b-quick-return", .24);
+        quickReturn.setDirectReturn(true);
+        quickReturn.setDirectReturnFrames(30);
+        quickReturn.capture(100, wrist);
+        quickReturn.bind(4000, 5600);
+        require(quickReturn.nominalDirectRestoreEndFrame() - quickReturn.returnStartFrame() == 30,
+                "opt-in direct return takes thirty frames");
+        require("return".equals(quickReturn.phaseNameAt(quickReturn.restoreEndFrame() - 1))
+                        && "restored".equals(quickReturn.phaseNameAt(quickReturn.restoreEndFrame())),
+                "opt-in direct return keeps its exact terminal frame");
         System.out.println("PASS meaning_gesture_stock_bap_capture_both_arms_fingers_independent_return");
     }
 

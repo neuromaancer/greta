@@ -102,6 +102,7 @@ public final class MeaningGesture {
         private List<Map<String, Double>> handReturnPath;
         private List<Double> handReturnClearance;
         private boolean directReturn;
+        private int directReturnFrames = RETURN_FRAMES;
         // Zero preserves the accepted nominal direct-return timeline. A
         // nonzero count is opened only after the terminal collision check has
         // proved that one-degree release needs another frame.
@@ -217,6 +218,12 @@ public final class MeaningGesture {
             directReturn = enabled;
         }
 
+        synchronized void setDirectReturnFrames(int frames) {
+            if (bound || !directReturn || frames < 1 || frames > RETURN_FRAMES)
+                throw new IllegalArgumentException("Invalid direct return duration");
+            directReturnFrames = frames;
+        }
+
 
         synchronized boolean isBound() { return bound; }
         synchronized boolean hasRawFrames() { return firstRawFrame >= 0; }
@@ -232,7 +239,7 @@ public final class MeaningGesture {
             return end < 0 ? -1 : end + WORKSPACE_RETURN_FRAMES;
         }
         synchronized int nominalDirectRestoreEndFrame() {
-            return directReturn && audioEndFrame >= 0 ? returnStartFrame() + RETURN_FRAMES : -1;
+            return directReturn && audioEndFrame >= 0 ? returnStartFrame() + directReturnFrames : -1;
         }
         synchronized int directSettleFrames() { return directSettleFrames; }
         /** Opens one bounded release-only frame at the current direct endpoint. */
@@ -320,7 +327,7 @@ public final class MeaningGesture {
             if (frame < returnStart) return semantic;
             if (directReturn) {
                 if (frame >= nominalDirectRestoreEndFrame()) return seatedBase;
-                double progress = (frame - returnStart) / (double) RETURN_FRAMES;
+                double progress = (frame - returnStart) / (double) directReturnFrames;
                 double target = interpolate(semantic, seatedBase, settleEase(progress));
                 double lift = approach.lift(joint);
                 if (lift > 0) {
