@@ -256,9 +256,15 @@ def _probe_json(ffprobe: str, path: Path, *, timeout_seconds: float, entries: st
 
 
 def _verify_frame_dimensions(capture: Capture) -> None:
+    ppm_header = f"P6\n{capture.width} {capture.height}\n255\n".encode("ascii")
     for frame in capture.frames:
         try:
             with frame.path.open("rb") as handle:
+                if frame.path.suffix == ".ppm":
+                    if (handle.read(len(ppm_header)) != ppm_header
+                            or os.fstat(handle.fileno()).st_size != len(ppm_header) + 3 * capture.width * capture.height):
+                        raise VideoExportError(f"invalid packed RGB frame for capture dimensions: {frame.path.name}")
+                    continue
                 header = handle.read(24)
         except OSError as exc:
             raise VideoExportError(f"cannot read frame: {frame.path.name}") from exc

@@ -209,7 +209,9 @@ after the 18-frame entry envelope, original raw frame numbers, and other
 behavior owners. Use the configured `gesture_release_lead` for coordinated
 finger release/workspace entry. The current separated rests use
 `gesture_return="direct"`: a 160 ms finishing hold followed by one continuous
-2.4 second minimum-jerk return from the final semantic pose to rest. Require
+1.2 second nominal minimum-jerk return from the final semantic pose to the
+calibrated palms-down tabletop rest. Use that rest at opening and after every
+turn. Require
 normal cross-hand and finger-palm air gaps at rest; keep full air gaps and the
 normal per-frame projection during return. Its final zero-weight restored frame
 must reach the exact base within correction rate limits and sampled-path checks,
@@ -254,7 +256,7 @@ cross-hand/body guards, and full forearm/upper-arm table padding unchanged; neve
 permit negative physical surface clearance. This is a local support envelope,
 not a general contact or mesh simulation. It requires separated direct-return
 rests; default room configurations retain constant table padding.
-The seat's `gesture_style` selects balanced/reserved/animated expressivity before
+The seat's `gesture_style` selects facilitator/reflective/engaged expressivity before
 Realizer and left/right proximal gains afterward. Preserve selected gesture
 references and word-marker links; style labels are not GMIT patient personas.
 Human review on 2026-11-03 rejected the earlier cross-hand-only candidate; that
@@ -374,7 +376,7 @@ Do not schedule from BML dispatch: TTS latency is variable. Preserve the gaze
 timeline for prequeued speech frames and cover the bounded audio interval with
 neck/eye-only masks so older queued frames cannot restore the previous gaze.
 Gaze owns the cervical channels while enabled and composes a small listener nod
-into pitch. Seeded backchannels have a 50% per-turn chance, at most one listener
+into pitch. Seeded backchannels have a 75% chance on turns with enough time, at most one listener
 nod per turn, after the initial gaze settles and before handoff/end. A nod lasts
 34 frames (1.36 seconds) with a ten-degree pitch peak and smooth onset and
 return. Among eligible listeners,

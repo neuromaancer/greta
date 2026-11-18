@@ -73,11 +73,37 @@ Greta's existing SPC/TMP/FLD/PWR expressivity parameters before realization and
 scales the captured proximal-arm deltas afterward. It does not change references,
 text, or word-marker links, and does not assign a GMIT patient personality.
 
-| Actor | Style | Current intent |
-| --- | --- | --- |
-| facilitator | `balanced` | restrained neutral movement |
-| patient-a | `reserved` | lower-amplitude movement |
-| patient-b | `animated` | comparatively more animated movement |
+| Actor | Style | Spatial extent (SPC) | Temporal extent (TMP) | Fluidity (FLD) | Power (PWR) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Facilitator | `facilitator` — measured, moderate reach | 0.12 | 0.58 | 0.45 | 0.18 |
+| A | `reflective` — compact, slower and flowing | -0.28 | 0.30 | 0.62 | 0.15 |
+| B | `engaged` — wider, brisker and more emphatic | 0.38 | 0.72 | 0.50 | 0.48 |
+
+These are values passed to the gesture signal in this build. For example,
+negative SPC contracts movable hand positions and higher TMP speeds the arm
+phases. The three profiles use the same semantic admission policy. They add
+no repeated strokes. Listener nods are scheduled independently.
+See the [Greta expressivity definitions](https://github.com/isir/greta/wiki/Expressivity-Parameters).
+
+The November 18 Full HD replay (`replay-20261118-185948-760`) completed
+seven recorded Pure turns, including two Azure Jenny turns for B. All seven
+speakers reached their exact tabletop rest. Six finished on the nominal
+frame and the last used four additional release-only frames. The hand guard
+checked 1,324 projected frames and observed 1,051 frame samples. The listener
+schedule included four exclusive nods (Facilitator once, A twice, B once).
+The capture contains 847 frames at 1920 × 1080 with a 72 ms median interval.
+The longest interval was 2,599 ms across a speaker change, of which 132 ms
+fell within scheduled speech. Within a single utterance, the longest gap
+between two captured frames was 352 ms. A 25 fps export repeats samples.
+A prior Full HD take stopped during A's opening hand movement and was
+excluded. These figures describe the completed run; the guard still rejects
+an opening that arrives too late to execute the checked motion.
+
+Deployment receipts for this update are stored in the runtime's
+`bin/GMIT/local/`: `deploy-20261118T175035631459Z`,
+`deploy-20261118T175538630570Z` and `deploy-20261118T175921229923Z`.
+To restore the prior deployment, pass their `receipt.json` files to
+`integrations.gmit.deploy --rollback` in reverse order.
 
 At 25 fps, the entry envelope first releases the fingers (frames 0–3), moves
 the arms into the separated workspace (3–9), then blends into the current stock
@@ -87,7 +113,7 @@ The facilitator's `gesture_release_lead="0.3"` starts 30% of the workspace
 movement during finger release.
 The current three seats use `gesture_return="direct"`. After both audio and
 captured stock arm motion finish, this mode has a 160 ms finishing hold, then
-a 2.4 s minimum-jerk return, moving continuously from the final semantic pose
+a nominal 1.2 s minimum-jerk return, moving continuously from the final semantic pose
 to rest without an intermediate workspace stop. This requires separated resting
 hands with the full normal cross-hand and finger-palm air gaps. Every return
 frame still passes the ordinary projection and sampled-path checks; at the end,
@@ -240,7 +266,7 @@ lexicons. Local receipts identify actual module code sources and resource hashes
 The English Java path needs no Python NLP server, broker, LLM, camera, or
 microphone. The historical MODIFF CPU worker is excluded from current runs.
 
-The deployment allowlist remains sixteen files. The earlier conversational revision's eight changed
+The earlier conversational revision used a sixteen-file allowlist. Its eight changed
 mappings copy these source files to the same relative paths under `greta_2.1`:
 `bin/GMIT/MeaningMinerBridge.java`, `bin/GMIT/MeaningGesture.java`,
 `bin/GMIT/SmokeProbe.java`, `bin/GMIT/SeatedScene.java`,
@@ -330,8 +356,8 @@ wrist/finger targets after entry remain unchanged. These proxy margins are not
 mesh-contact proof. The user accepted the native static preview as naturally
 flat on the table; full-motion acceptance is recorded separately.
 
-Listener nods now last 28 frames (1.12 seconds) with smooth onset and return.
-The seeded 50% trigger is unchanged. Among listening actors, those with fewer
+On November 7, listener nods lasted 28 frames (1.12 seconds) with smooth onset and return.
+That revision used a seeded 50% trigger. Among listening actors, those with fewer
 scheduled nods have priority, with seeded random tie-breaking. The facilitator
 was already eligible; this change reduces repeated selection of the same peer.
 Only one listener can nod per turn. MODIFF is excluded from these checks and

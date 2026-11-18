@@ -74,6 +74,19 @@ public final class ReplayVideoTest {
         require(failedSubtitleJson.contains("\"status\": \"partial\"")
                         && failedVideoJson.contains("\"status\":\"partial\""),
                 "a later finalizer failure must downgrade both artifacts");
+        File rgbFile = new File(directory, "sample.ppm");
+        ReplayVideo.writePpm(rgbFile, width, height, rgb, "A: A visible HD caption.");
+        byte[] fullFrame = Files.readAllBytes(rgbFile.toPath());
+        byte[] header = ("P6\n" + width + " " + height + "\n255\n").getBytes(StandardCharsets.US_ASCII);
+        require(fullFrame.length == header.length + width * height * 3, "complete RGB frame");
+        int start = header.length;
+        require(fullFrame[start] == 22 && fullFrame[start + 1] == 70 && fullFrame[start + 2] == 120,
+                "HD preserves the three source color channels");
+        boolean captionInk = false;
+        for (int i = start + width * (height / 2) * 3; i < fullFrame.length; i += 3) {
+            if ((fullFrame[i] & 255) > 200) { captionInk = true; break; }
+        }
+        require(captionInk, "HD caption must be burned into recorded RGB pixels");
         System.out.println("ReplayVideoTest PASS");
     }
 }

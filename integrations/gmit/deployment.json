@@ -13,7 +13,6 @@
     "bin/GMIT/ReplaySubtitles.java",
     "bin/GMIT/ReplayVideo.java",
     "bin/GMIT/SeatedScene.java",
-    "bin/GMIT/SeatedRestPoseLibrary.java",
     "bin/GMIT/ListenerGaze.java",
     "bin/GMIT/GazeModiffAdapter.java",
     "bin/GMIT/MeaningMinerBridge.java",

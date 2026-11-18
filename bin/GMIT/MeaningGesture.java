@@ -9,7 +9,10 @@ import java.util.TreeMap;
 public final class MeaningGesture {
     static final int FRAME_MILLIS = 40;
     static final int BLEND_FRAMES = 18;
-    static final int RETURN_FRAMES = 60; // 2.4 seconds of decelerated arm and hand settling.
+    // Direct returns are part of the visible seated turn handoff.  Thirty
+    // frames retains the existing minimum-jerk path while restoring the stock
+    // tabletop pose in about 1.2 seconds.
+    static final int RETURN_FRAMES = 30;
     static final int RETURN_DELAY_FRAMES = 4; // Briefly finish the gesture after the voice ends.
     static final int MAX_DIRECT_SETTLE_FRAMES = 16; // Bounded 25 fps release-only tail after a direct return.
     static final int MAX_CAPTURE_TAIL_FRAMES = 125;
@@ -39,10 +42,17 @@ public final class MeaningGesture {
             this.fluidity = fluidity; this.power = power;
         }
         static Style named(String name) {
-            if ("legacy".equals(name)) return new Style(name, 1, 1, .5, .5, .5, .5);
-            if ("balanced".equals(name)) return new Style(name, 1, 1, .35, .42, .7, .25);
-            if ("reserved".equals(name)) return new Style(name, .65, .85, .25, .35, .65, .18);
-            if ("animated".equals(name)) return new Style(name, 1.1, 1.0, .45, .48, .75, .32);
+            if ("legacy".equals(name)) return new Style(name, 1, 1, 0, 0, 0, 0);
+            // Greta's gesture renderer consumes these four dimensions for
+            // every chosen MeaningMiner gesture. SPC remains signed, while
+            // its current TMP, FLD, and PWR implementation uses [0,1].
+            if ("facilitator".equals(name)) return new Style(name, .90, .90, .12, .58, .45, .18);
+            if ("reflective".equals(name)) return new Style(name, .62, .76, -.28, .30, .62, .15);
+            if ("engaged".equals(name)) return new Style(name, 1.12, 1.02, .38, .72, .50, .48);
+            // Preserve the previous public room labels for old configurations.
+            if ("balanced".equals(name)) return named("facilitator");
+            if ("reserved".equals(name)) return named("reflective");
+            if ("animated".equals(name)) return named("engaged");
             throw new IllegalArgumentException("Unknown seated gesture style: " + name);
         }
     }

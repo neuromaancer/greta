@@ -11,7 +11,7 @@ import wave
 import zlib
 from pathlib import Path
 
-from integrations.gmit.export_video import VideoExportError, _publish_no_clobber, export_video, load_capture
+from integrations.gmit.export_video import VideoExportError, _publish_no_clobber, _verify_frame_dimensions, export_video, load_capture
 
 
 def _png(path: Path, rgb: tuple[int, int, int]) -> None:
@@ -75,6 +75,21 @@ def _capture(root: Path, *, status: str = "completed", frame_file: str = "video-
 
 
 class VideoExportTests(unittest.TestCase):
+    def test_hd_rgb_frame_requires_matching_header_and_complete_pixels(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rel = "video-frames/frame-000001.ppm"
+            _capture(root, frame_file=rel)
+            frame = root / rel
+            header = b"P6\n2 2\n255\n"
+            frame.write_bytes(header + b"\xfe\x15\x40" * 4)
+            capture = load_capture(root)
+            _verify_frame_dimensions(capture)
+            for broken in (header + bytes(11), b"P6\n1 4\n255\n" + bytes(12)):
+                frame.write_bytes(broken)
+                with self.assertRaises(VideoExportError):
+                    _verify_frame_dimensions(capture)
+
     def test_rejects_partial_and_path_escape(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "partial"

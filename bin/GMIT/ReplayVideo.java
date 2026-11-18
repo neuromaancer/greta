@@ -24,6 +24,7 @@ public final class ReplayVideo {
     private static final int FRAME_MILLIS = 40;
     private final File frames;
     private final File manifest;
+    private final boolean fullHD = Boolean.getBoolean("gmit.video.fullHD");
     private final List<String> frameRows = new ArrayList<String>();
     private final List<String> audioRows = new ArrayList<String>();
     private int width, height;
@@ -58,13 +59,15 @@ public final class ReplayVideo {
         if (frameRows.size() >= MAX_FRAMES)
             throw new IllegalStateException("Video frame limit exceeded");
 
-        BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        int[] pixels = ((java.awt.image.DataBufferInt)image.getRaster().getDataBuffer()).getData();
-        for (int pixel = 0, i = 0; pixel < pixels.length; pixel++, i += 3)
-            pixels[pixel] = ((rgb[i] & 255) << 16) | ((rgb[i + 1] & 255) << 8) | (rgb[i + 2] & 255);
-        draw(image, subtitle);
-        String name = String.format(Locale.ROOT, "frame-%06d.png", frameRows.size() + 1);
-        writeFrame(image, new File(frames, name));
+        String name = String.format(Locale.ROOT, "frame-%06d.%s", frameRows.size() + 1, fullHD ? "ppm" : "png");
+        File file = new File(frames, name);
+        if (fullHD) {
+            writePpm(file, w, h, rgb, subtitle);
+        } else {
+            BufferedImage image = sceneImage(w, h, rgb);
+            draw(image, subtitle);
+            writeFrame(image, file);
+        }
         width = w;
         height = h;
         lastFrame = timerMillis;
@@ -73,7 +76,33 @@ public final class ReplayVideo {
         if (frameRows.size() % 20 == 0) write(false);
     }
 
-    private static void writeFrame(BufferedImage image, File file) throws Exception {
+    // Ogre supplies a fresh packed RGB readback. Draw directly into those
+    // bytes so Full HD recording can keep sampling while the actors move.
+    static void writePpm(File file, int w, int h, byte[] rgb, String caption) throws Exception {
+        if (caption != null && !caption.isEmpty()) {
+            java.awt.image.DataBufferByte data = new java.awt.image.DataBufferByte(rgb, rgb.length);
+            java.awt.image.WritableRaster raster = java.awt.image.Raster.createInterleavedRaster(
+                    data, w, h, 3 * w, 3, new int[]{0, 1, 2}, null);
+            java.awt.image.ColorModel colors = new java.awt.image.ComponentColorModel(
+                    java.awt.color.ColorSpace.getInstance(java.awt.color.ColorSpace.CS_sRGB),
+                    false, false, java.awt.Transparency.OPAQUE, java.awt.image.DataBuffer.TYPE_BYTE);
+            draw(new BufferedImage(colors, raster, false, null), caption);
+        }
+        try (java.io.OutputStream out = Files.newOutputStream(file.toPath())) {
+            out.write(("P6\n" + w + " " + h + "\n255\n").getBytes(StandardCharsets.US_ASCII));
+            out.write(rgb);
+        }
+    }
+
+    static BufferedImage sceneImage(int w, int h, byte[] rgb) {
+        BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        int[] pixels = ((java.awt.image.DataBufferInt)image.getRaster().getDataBuffer()).getData();
+        for (int pixel = 0, i = 0; pixel < pixels.length; pixel++, i += 3)
+            pixels[pixel] = ((rgb[i] & 255) << 16) | ((rgb[i + 1] & 255) << 8) | (rgb[i + 2] & 255);
+        return image;
+    }
+
+    static void writeFrame(BufferedImage image, File file) throws Exception {
         java.util.Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
         if (!writers.hasNext()) throw new IllegalStateException("PNG encoder is unavailable");
         ImageWriter writer = writers.next();

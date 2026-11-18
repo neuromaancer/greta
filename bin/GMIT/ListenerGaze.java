@@ -24,6 +24,8 @@ public final class ListenerGaze {
     private static final int NOD_DURATION_FRAMES = 34; // 1.36 seconds: visible but still a single conversational bob.
     private static final int NOD_SETTLE_FRAMES = 2;
     private static final double NOD_PITCH_RADIANS = Math.toRadians(10);
+    private static final int NOD_TRIGGER_DENOMINATOR = 4;
+    private static final int NOD_TRIGGER_NUMERATOR = 3;
     private static volatile Throwable failure;
     private static String speaker;
     private static Method currentFrame;
@@ -173,10 +175,13 @@ public final class ListenerGaze {
     private static void addOneNod(List<TimingEvent> events, String speakerId, int listenerFrame,
                                   int latestFrame, long seed, Map<String, Integer> nodCounts) {
         // Callers commonly derive adjacent per-event seeds. Random's first draw
-        // does not decorrelate those well enough for a visible 50% gate, so mix
+        // does not decorrelate those well enough for the probability gate, so mix
         // the full 64-bit value before using it for every backchannel decision.
         Random random = new Random(mixSeed(seed));
-        if (!random.nextBoolean()) return; // Deliberately occasional, never a required behavior.
+        // Keep an occasional omission so sustained listening does not become
+        // rhythmic, while making the backchannel clearly present in most
+        // eligible spoken turns.
+        if (random.nextInt(NOD_TRIGGER_DENOMINATOR) >= NOD_TRIGGER_NUMERATOR) return;
         List<String> listeners = new ArrayList<>();
         int fewestNods = Integer.MAX_VALUE;
         for (String id : ACTORS) if (!id.equals(speakerId)) {

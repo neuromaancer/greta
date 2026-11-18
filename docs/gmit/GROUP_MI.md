@@ -185,7 +185,7 @@ translation and yaw, and smooths bounded head/eye turns over 18 Greta frames
 speaker takes priority at utterance end. The final head transition is scheduled
 inside the audio interval so it finishes as speech ends. Listener turns remain
 scheduled from the actual Audio start plus 200 ms. A deterministic seed controls
-an optional single listener nod per turn (50% probability, 10-degree pitch).
+an optional single listener nod per eligible turn (75% probability, 10-degree pitch).
 Each nod lasts 1.36 seconds with a smooth onset and return. When a nod is
 triggered, the eligible listener with fewer scheduled nods in this session has
 priority; ties are resolved by the seeded random generator. The facilitator is
@@ -204,8 +204,8 @@ over seven cervical joints; it is not ten degrees at each joint. Earlier
 seven-degree and 5.5-degree candidates did not establish visual acceptance.
 The user subsequently clarified that the motion should be more visible than
 seven degrees; the 5.5-degree version was visible but too subtle. The smooth
-single down-and-return envelope, seeded 50% trigger, preference for listeners
-with fewer scheduled nods, and one-nodding-listener limit remain unchanged.
+single down-and-return envelope, then-50% trigger, preference for listeners
+with fewer scheduled nods, and one-nodding-listener limit were retained in that run.
 Short turns omit a nod when there is insufficient room after gaze settling
 and before the handoff. These are scheduled backchannels, not an inference
 of a listener's understanding or agreement.
@@ -215,7 +215,7 @@ both enabled and disabled. Tests cover the actual scheduled nod's peak, neutral
 endpoints, timing, fairness, seeded randomness, and exclusivity. The behavior
 check uses an existing Pure conversation; it does not generate a new episode
 or use the historical RL path. The nod deployment changes only
-`bin/GMIT/ListenerGaze.java` through the unchanged sixteen-file allowlist. A
+`bin/GMIT/ListenerGaze.java` through the sixteen-file allowlist used on November 9. A
 subsequent Pure replay exposed a separate coordinated-return case; its guarded
 fix changes `bin/GMIT/HandCollision.java` and is described in
 [MEANING_MINER.md](MEANING_MINER.md#coordinated-settling-in-pure-replay-2026-11-09).

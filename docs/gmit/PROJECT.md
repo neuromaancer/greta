@@ -1,6 +1,6 @@
 # GMIT in Greta
 
-Updated 2026-11-09. P0 inspection and synthetic P1 acceptance are complete.
+Updated 2026-11-18. P0 inspection and synthetic P1 acceptance are complete.
 Pure LLM is now the only active dialogue condition: after the existing fixed
 opening, the LLM selects facilitator dialogue acts and generates utterances.
 Use [REPLAY.md](REPLAY.md) for generation
@@ -13,7 +13,11 @@ Transcript replay exports synchronized SRT/JSON. `-RecordVideo` captures the
 rendered scene with subtitles burned into its pixels, and the separate local
 encoder produces an MP4 with synthesized audio. Display names are Facilitator,
 A, and B; see [SUBTITLES.md](SUBTITLES.md). MeaningMiner remains opt-in through
-`-MeaningMiner`; subtitles alone do not enable semantic gestures.
+`-MeaningMiner`; subtitles alone do not enable semantic gestures. Current
+profiles give each speaker a different reach, tempo, fluidity and power.
+All actors start and finish with both palms down on the table. The nominal
+direct return takes 1.2 s. Each eligible turn has a 75% chance of one listener
+nod lasting 1.36 s. See [MeaningMiner](MEANING_MINER.md) for the gesture settings.
 The [six controlled transcript drafts](CONDITIONS.md) illustrate a proposed
 task/social by buddy/individualist 2 x 3 design. They are explicitly
 assistant-authored synthetic stimuli, not raw local-Qwen simulation output;
@@ -80,17 +84,17 @@ The earlier November 7 conversational revision narrows MeaningMiner activation b
 Planner through each seat's `gesture_admission="ideational-main"` policy, while
 preserving raw extraction for audit and failing open when an ideational main
 anchor is unresolved. Gesture amplitude uses a 0.24 base seated gain and updated
-balanced/reserved/animated profiles. The calibrated rests now use close centered
+balanced/reserved/animated profiles in that November revision. Its calibrated rests used close centered
 facilitator palms, wider patient-A palms, and asymmetric patient-B palms;
 their workspace offsets and body/table clearance policy were recalibrated.
-The return uses a 160 ms finishing hold plus a continuous 2.4 s minimum-jerk
+That revision used a 160 ms finishing hold plus a continuous 2.4 s minimum-jerk
 settling motion, with full collision checks and exact-rest verification.
 Palm/finger tabletop padding tapers near the calibrated contact pose while
 retaining the physical boundary. Collision offsets are released by safe subsets
 at no more than one degree per joint per frame, avoiding repeated coarse resets.
 Listener gaze retains simultaneous Audio-start-plus-200-ms turns,
-while the actual next speaker takes priority at the handoff; a seeded 50% optional
-single-listener 4-degree nod is independently switchable. The deployed audible
+and handoff to the next speaker. At the time, a seeded 50% optional
+single-listener 4-degree nod was independently switchable. The deployed audible
 replay completed seven turns with nine selected gestures, 1,402 passing projected
 frames, seven restorations, and three exclusive listener nods. MODIFF brow output
 remained active, and legacy scratch files were restored. The user accepted the
@@ -102,14 +106,14 @@ historical. That revision changed eight runtime paths through the existing
 sixteen-file allowlist. Its receipt sequence and reverse-order recovery commands
 are recorded in [MEANING_MINER.md](MEANING_MINER.md#verification-record).
 
-The subsequent replay repair addresses the user's independent run, which
+The November 7 replay repair addressed the user's independent run, which
 stopped with a residual shoulder correction at the final rest. A bounded
 release-only tail reaches the exact rest without increasing the one-degree
 release limit or relaxing geometric checks. Patient B's right palm and fingers
 were recalibrated at the accepted horizontal position; the user accepted the
-new native static preview. Nods last 1.12 seconds and favor listening actors
+new native static preview. In that revision, nods lasted 1.12 seconds and favored listening actors
 with fewer prior nods, including the facilitator, while retaining the seeded
-50% trigger and one-listener exclusivity. Current checks exclude MODIFF.
+50% trigger and one-listener exclusivity. Those checks excluded MODIFF.
 The deployed audible replay completed seven turns and exact restorations,
 1,350 passing projected frames, and one nod per actor; the user confirmed that
 the hand placement, return, nods, speech, lips, and gaze were normal. Screenshot
@@ -229,10 +233,11 @@ content, not desktop-window visibility. No automatic retries repeat a speech.
 
 ## Explicit deployment and recovery
 
-`integrations/gmit/deployment.json` is the complete sixteen-file allowlist: the scene,
+`integrations/gmit/deployment.json` lists all twenty runtime files: the scene,
 four P1 BML files, the group MI scenario, the PowerShell launcher, Java probe
 source, seated-pose helper, listener-gaze helper, optional MODIFF bridge,
-MeaningMiner bridge, gesture and hand-geometry helpers, room layout, and local-output ignore
+MeaningMiner bridge, gesture and hand-geometry helpers, room layout, subtitle and
+video helpers, Java/Python Azure speech adapters, and local-output ignore
 file. Every source path maps to the identical
 relative runtime path.
 No resource tree or existing JAR is copied. Instructions, agent definitions,

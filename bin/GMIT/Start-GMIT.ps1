@@ -3,7 +3,7 @@ param(
     [switch]$DisableListenerGaze, [switch]$DisableListenerNods, [switch]$DisableTabletopArms,
     [switch]$MeaningMiner, [switch]$DisableHandSafety,
     [switch]$VaryRestPoses, [int]$RestSeed = 711,
-    [switch]$Muted, [switch]$RecordVideo,
+    [switch]$Muted, [switch]$RecordVideo, [switch]$FullHD,
     [string]$AzurePython,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
@@ -19,6 +19,7 @@ $automatic = $Smoke -or $GroupMI -or [bool]$Replay
 if ($RecordVideo -and ((-not ($GroupMI -or $Replay)) -or $Preview)) {
     throw '-RecordVideo requires a GroupMI/Replay run with speech.'
 }
+if ($FullHD -and -not $RecordVideo) { throw '-FullHD requires -RecordVideo.' }
 if ($Muted -and -not $automatic) { throw '-Muted requires an automatic Smoke/GroupMI/Replay run.' }
 if ($AzurePython) {
     if ((-not ($GroupMI -or $Replay)) -or $Preview) { throw '-AzurePython requires a GroupMI/Replay run with speech.' }
@@ -29,8 +30,8 @@ if ($AzurePython) {
 if ($MeaningMiner -and ((-not ($GroupMI -or $Replay)) -or $DisableTabletopArms)) {
     throw 'MeaningMiner requires a seated GroupMI/Replay run with tabletop arms enabled.'
 }
-if ($VaryRestPoses -and (-not $MeaningMiner -or $DisableHandSafety -or $Preview)) {
-    throw '-VaryRestPoses requires spoken MeaningMiner playback with hand safety enabled.'
+if ($VaryRestPoses -or $PSBoundParameters.ContainsKey('RestSeed')) {
+    Write-Warning '-VaryRestPoses is retired and ignored. GMIT replay keeps all three actors at their calibrated palms-down tabletop rest.'
 }
 if ($ModiffDirectory) {
     if ((-not ($GroupMI -or $Replay)) -or $DisableListenerGaze) {
@@ -92,9 +93,8 @@ if ($Replay) {
 $runTimeoutSeconds = 120 + $StartDelaySeconds + $EndHoldSeconds + $turnCount * (10 + 15 + $TurnGapSeconds + 2)
 # Three bounded extractor initializations, one bounded analysis per turn,
 # and a conservative 9-second seated gesture return budget per turn. This
-# covers the 8.240-second bounded restore plus observation margin.
+# covers the bounded restore plus observation margin.
 if ($MeaningMiner) { $runTimeoutSeconds += 90 + $turnCount * (30 + 9) }
-if ($VaryRestPoses) { $runTimeoutSeconds += 4 * $turnCount }
 if ($AzurePython) { $runTimeoutSeconds += 25 * $turnCount }
 $runPrefix = if ($GroupMI) { 'group-mi-' } elseif ($Replay) { 'replay-' } else { 'run-' }
 $run = Join-Path $PSScriptRoot ('local\' + $runPrefix + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
@@ -116,7 +116,6 @@ try {
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplaySubtitles.java') + '"')
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplayVideo.java') + '"')
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'AzurePatientSpeech.java') + '"')
-        $compileArgs += ('"' + (Join-Path $PSScriptRoot 'SeatedRestPoseLibrary.java') + '"')
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -139,10 +138,14 @@ try {
         if ($DisableListenerNods) { $arguments = @('-Dgmit.gaze.backchannel=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
-        if ($VaryRestPoses) { $arguments = @('-Dgmit.rest.variation=true', "-Dgmit.rest.seed=$RestSeed") + $arguments }
         if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }
         if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }
         if ($RecordVideo) { $arguments = @('-Dgmit.video.enabled=true') + $arguments }
+        if ($FullHD) {
+            # A 1080p Ogre readback creates a fresh 6 MiB array. Keep it
+            # below G1's humongous-object threshold during timed BAP delivery.
+            $arguments = @('-Dgmit.video.fullHD=true', '-Xms1g', '-Xmx4g', '-XX:+UseG1GC', '-XX:G1HeapRegionSize=16m') + $arguments
+        }
         if ($AzurePython) { $arguments = @(('"-Dgmit.azure.python=' + $AzurePython + '"')) + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }

@@ -120,7 +120,18 @@ public final class MeaningGestureTest {
         } catch (IllegalArgumentException expected) { excessiveOffsetRejected = true; }
         require(excessiveOffsetRejected, "workspace fitting retains explicit finite angular bounds");
         MeaningGesture.Turn[] styled = new MeaningGesture.Turn[3];
-        String[] styleNames = {"reserved", "balanced", "animated"};
+        String[] styleNames = {"reflective", "facilitator", "engaged"};
+        MeaningGesture.Style reflective = MeaningGesture.Style.named("reflective");
+        MeaningGesture.Style facilitatorStyle = MeaningGesture.Style.named("facilitator");
+        MeaningGesture.Style engaged = MeaningGesture.Style.named("engaged");
+        require(reflective.spatial < facilitatorStyle.spatial && facilitatorStyle.spatial < engaged.spatial
+                        && reflective.temporal < facilitatorStyle.temporal && facilitatorStyle.temporal < engaged.temporal
+                        && reflective.power < facilitatorStyle.power && facilitatorStyle.power < engaged.power,
+                "seated profiles provide ordered contracted, moderate, and expansive gesture styles");
+        require(MeaningGesture.Style.named("reserved").name.equals("reflective")
+                        && MeaningGesture.Style.named("balanced").name.equals("facilitator")
+                        && MeaningGesture.Style.named("animated").name.equals("engaged"),
+                "historical room style labels preserve their profile mapping");
         for (int i = 0; i < styled.length; i++) {
             styled[i] = new MeaningGesture.Turn("facilitator", "style-check-" + i, .35,
                     new LinkedHashMap<String, Double>(), MeaningGesture.Style.named(styleNames[i]));
@@ -283,7 +294,7 @@ public final class MeaningGestureTest {
             require(direct.clearanceWeightAt(directStart + offset) == 1.0, "direct return retains the full hand air gap");
             previous = value;
         }
-        require(Math.abs(direct.valueAt("l_wrist_flexion", directStart + 30, 12) - 26) < .000001,
+        require(Math.abs(direct.valueAt("l_wrist_flexion", directStart + MeaningGesture.RETURN_FRAMES / 2, 12) - 26) < .000001,
                 "direct return midpoint lies halfway between semantic pose and rest");
         require(direct.valueAt("l_wrist_flexion", direct.restoreEndFrame(), 12) == 12,
                 "direct return ends at the exact resting pose");
@@ -307,7 +318,8 @@ public final class MeaningGestureTest {
                     double lift = baseline.get(joint) - approach.get(joint);
                     require(lift >= 0 && lift <= profile.lift(joint),
                             "tabletop approach keeps the handshape and bounded joint targets");
-                    if (frame == directStart + 30) require(lift == profile.lift(joint), "tabletop lift peaks mid-return");
+                    if (frame == directStart + MeaningGesture.RETURN_FRAMES / 2)
+                        require(lift == profile.lift(joint), "tabletop lift peaks mid-return");
                 }
             }
         }
@@ -339,21 +351,20 @@ public final class MeaningGestureTest {
         lateDirect.capture(180, wrist); lateDirect.capture(160, wrist);
         require(lateDirect.restoreEndFrame() == movedNominalEnd + 1 && lateDirect.directSettleFrames() == 1,
                 "duplicate and non-endpoint raw captures preserve the active tail");
-        require(MeaningGesture.MAX_DIRECT_RESTORE_AFTER_AUDIO_MILLIS == 8240,
+        require(MeaningGesture.MAX_DIRECT_RESTORE_AFTER_AUDIO_MILLIS == 7040,
                 "shared playback wait bound covers capture tail, hold, return, and settling tail");
         boolean returnModeLocked = false;
         try { direct.setDirectReturn(false); } catch (IllegalStateException expected) { returnModeLocked = true; }
         require(returnModeLocked, "return mode cannot change after audio binding");
         MeaningGesture.Turn quickReturn = new MeaningGesture.Turn("patient-b", "b-quick-return", .24);
         quickReturn.setDirectReturn(true);
-        quickReturn.setDirectReturnFrames(30);
         quickReturn.capture(100, wrist);
         quickReturn.bind(4000, 5600);
         require(quickReturn.nominalDirectRestoreEndFrame() - quickReturn.returnStartFrame() == 30,
-                "opt-in direct return takes thirty frames");
+                "the default direct return takes thirty frames");
         require("return".equals(quickReturn.phaseNameAt(quickReturn.restoreEndFrame() - 1))
                         && "restored".equals(quickReturn.phaseNameAt(quickReturn.restoreEndFrame())),
-                "opt-in direct return keeps its exact terminal frame");
+                "the default direct return reaches its exact terminal frame");
         System.out.println("PASS meaning_gesture_stock_bap_capture_both_arms_fingers_independent_return");
     }
 

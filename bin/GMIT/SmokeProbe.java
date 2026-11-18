@@ -5,12 +5,10 @@ import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.*;
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
@@ -375,9 +373,11 @@ public final class SmokeProbe {
             // Window back-buffer capture can return black when the window is occluded.
             Class<?> texture = player.getClass().getClassLoader().loadClass("greta.auxiliary.player.ogre.OgreRenderTexture");
             captureTarget = texture.getConstructor(camera.getClass()).newInstance(camera);
-            int captureWidth = Integer.getInteger("gmit.capture.width", 920);
+            boolean fullHD = Boolean.getBoolean("gmit.video.fullHD");
+            int captureWidth = fullHD ? 1920 : Integer.getInteger("gmit.capture.width", 920);
+            int captureHeight = fullHD ? 1080 : (int)Math.round(captureWidth * 576.0 / 920.0);
             if (captureWidth < 640 || captureWidth > 2560) throw new IllegalArgumentException("Capture width must be 640 to 2560");
-            call(captureTarget,"setSize",new Class<?>[]{int.class,int.class},captureWidth,(int)Math.round(captureWidth * 576.0 / 920.0));
+            call(captureTarget,"setSize",new Class<?>[]{int.class,int.class},captureWidth,captureHeight);
             call(captureTarget,"prepareCapture");
             Thread.sleep(300);
             log("capture=OgreRenderTexture same_player_camera=true desktop_visibility=unverified");
@@ -386,10 +386,10 @@ public final class SmokeProbe {
         int h = (Integer) call(captureTarget, "getCaptureHeight");
         byte[] rgb = (byte[]) call(captureTarget, "getCaptureData");
         if (w <= 0 || h <= 0 || rgb.length != w * h * 3) throw new IllegalStateException("Invalid render buffer");
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0, i = 0; y < h; y++) for (int x = 0; x < w; x++, i += 3)
-            img.setRGB(x, y, ((rgb[i] & 255) << 16) | ((rgb[i+1] & 255) << 8) | (rgb[i+2] & 255));
-        ImageIO.write(img, "png", new File(output, name + ".png"));
+        if (Boolean.getBoolean("gmit.video.fullHD"))
+            ReplayVideo.writePpm(new File(output, name + ".ppm"), w, h, rgb, null);
+        else
+            ReplayVideo.writeFrame(ReplayVideo.sceneImage(w, h, rgb), new File(output, name + ".png"));
         diagnosticCaptureCount++;
         diagnosticCaptureMaxMillis = Math.max(diagnosticCaptureMaxMillis, System.currentTimeMillis() - captureStarted);
     }
@@ -403,58 +403,6 @@ public final class SmokeProbe {
         video.frame(w,h,rgb,now,subtitles == null ? "" : subtitles.textAt(now));
     }
     private static void recordVideoFrame() throws Exception { if (video != null) recordVideoFrame(videoClock); }
-    /** Keep API-scheduled rest transitions observable in Greta Timer time. */
-    private static void observeRest(long deadline, Method clock, Caption caption,
-                                    Map<String, Integer> expected) throws Exception {
-        if (deadline == 0) return;
-        long now = ((Number)clock.invoke(null)).longValue();
-        if (deadline <= now) {
-            recordVideoFrame(clock);
-            assertAudioCounts(expected);
-            SeatedScene.verifyPose();
-            log("rest_observed deadline_greta_ms=" + deadline + " actual_greta_ms=" + now
-                    + " already_elapsed=true");
-            return;
-        }
-        long watchdog = System.currentTimeMillis() + (deadline - now) + MEANING_WATCHDOG_GRACE_MILLIS;
-        while (((Number)clock.invoke(null)).longValue() < deadline) {
-            if (caption != null) caption.checkCancelled();
-            if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
-            if (System.currentTimeMillis() > watchdog) throw new IllegalStateException("Greta rest clock stopped progressing");
-            assertAudioCounts(expected);
-            SeatedScene.observeMeaningGesture();
-            SeatedScene.checkHealthy();
-            recordVideoFrame(clock);
-            Thread.sleep(video == null ? 40 : 10);
-        }
-        // Preserve a final source frame for local timing edits.
-        recordVideoFrame(clock);
-        assertAudioCounts(expected);
-        SeatedScene.verifyPose();
-        log("rest_observed deadline_greta_ms=" + deadline
-                + " actual_greta_ms=" + ((Number)clock.invoke(null)).longValue());
-    }
-    /** Keep the pre-first-turn opening pose in the recording before it moves. */
-    private static void preserveOpeningFrame(Method clock, Caption caption,
-                                             Map<String, Integer> expected) throws Exception {
-        long first = ((Number)clock.invoke(null)).longValue();
-        long deadline = first + 600;
-        long watchdog = System.currentTimeMillis() + 1600;
-        recordVideoFrame(clock);
-        while (((Number)clock.invoke(null)).longValue() < deadline) {
-            if (caption != null) caption.checkCancelled();
-            if (failure != null) throw new IllegalStateException("Runtime thread failed", failure);
-            if (System.currentTimeMillis() > watchdog) throw new IllegalStateException("Greta opening clock stopped progressing");
-            assertAudioCounts(expected);
-            SeatedScene.observeMeaningGesture();
-            SeatedScene.checkHealthy();
-            recordVideoFrame(clock);
-            Thread.sleep(video == null ? 40 : 10);
-        }
-        recordVideoFrame(clock);
-        log("opening_frame_preserved elapsed_greta_ms="
-                + (((Number)clock.invoke(null)).longValue() - first));
-    }
     private static void observeAudio(final String actor) throws Exception {
         audio.put(actor, new CopyOnWriteArrayList<>());
         Object performer = objects.get("gmit-" + actor + "-audio");
@@ -489,8 +437,6 @@ public final class SmokeProbe {
         Method clock = objects.get("gmit-player").getClass().getClassLoader()
                 .loadClass("greta.core.util.time.Timer").getMethod("getTimeMillis");
         recordVideoFrame(clock);
-        if (scenarioTurn != null)
-            observeRest(SeatedScene.prepareRestForSpeech(actor, scenarioTurn.eventId), clock, caption, expected);
         title("Turn " + ordinal + "/" + total + ": " + speakerLabel(actor));
         boolean meaningTurn = scenarioTurn != null && meaningPlans.contains(scenarioTurn.eventId);
         log("dispatch sequence=" + ordinal + " actor=" + actor + " route="
@@ -582,8 +528,6 @@ public final class SmokeProbe {
             SeatedScene.finishMeaningTurn(actor, scenarioTurn.eventId);
         }
         log("schedule_elapsed sequence="+ordinal+" buffer_position="+call(a,"getPlayingBufferPos")+" physical_playback=unverified");
-        if (scenarioTurn != null)
-            observeRest(SeatedScene.chooseRestAfterSpeech(actor, scenarioTurn.eventId), clock, caption, expected);
     }
 
     /** Alternate valid listener targets across successive speaking turns. */
@@ -736,7 +680,6 @@ public final class SmokeProbe {
             }
             log("meaningminer_prepared turns=" + meaningPlans.size() + " actors=3"
                     + " dialogue_changed=false speech_generated=false");
-            SeatedScene.setOpeningRests(scenario.turns.get(0).actor);
         }
         Thread.sleep(2000);
         SeatedScene.verifyPose();
@@ -770,8 +713,6 @@ public final class SmokeProbe {
             recordVideoFrame(videoClock);
         }
         Map<String,Integer> expected = new HashMap<>(); for (String actor : ACTORS) expected.put(actor, 0);
-        if (scenario != null && video != null && Boolean.getBoolean("gmit.rest.variation"))
-            preserveOpeningFrame(videoClock, caption, expected);
         String scenarioOrder = null;
         try {
             if (scenario == null) {

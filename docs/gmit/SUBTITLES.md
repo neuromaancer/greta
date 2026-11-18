@@ -25,11 +25,19 @@ The finished movie includes those WAVs as audible audio. Omit `-Muted` to hear
 the live run as well. Do not use the retired MODIFF launcher.
 
 `-RecordVideo` captures the actual Ogre scene and draws the active caption into
-each PNG's pixels. It suppresses the separate Java caption window. The resulting
+each recorded frame. It suppresses the separate Java caption window. The resulting
 MP4 therefore has permanent subtitles inside the image, visible without loading
 an external subtitle track. Recording still opens Greta while it renders; it is
-not a headless renderer. Keep the run directory, including its WAV/PNG/JSON
+not a headless renderer. Keep the run directory, including its WAV, image and JSON
 files, until encoding finishes. Cancellation/failure leaves partial evidence.
+
+Add `-FullHD` to `-RecordVideo` to render the scene and captions at
+1920 × 1080 directly from the Ogre camera. Without it, the default recording
+size is 920 × 576. Full HD writes uncompressed RGB (binary PPM) frames to
+keep compression off the playback thread. Each frame uses about 6.2 MB.
+Allow up to 9.4 GB per minute captured at 25 fps, plus diagnostics. The
+ordinary recorder uses PNG. Both produce a captioned H.264/AAC MP4 with
+the same export command.
 
 Without `-RecordVideo`, ordinary `-Replay`/`-GroupMI` uses a separate owned
 desktop subtitle overlay and still exports SRT/JSON. That overlay is not part of
@@ -87,13 +95,14 @@ recording does not establish repeatable completion for every transcript.
 
 ## Deployment and recovery
 
-The allowlist contains eighteen files. New `bin/GMIT/ReplaySubtitles.java` and
+The current Full HD deployment contains twenty allowlisted files. In the
+November 9 subtitle rollout the list grew to eighteen. Its new `bin/GMIT/ReplaySubtitles.java` and
 `bin/GMIT/ReplayVideo.java`, and updated `SmokeProbe.java`/`Start-GMIT.ps1`, map to
 the same relative runtime paths. Tests and NetBeans launcher source stay in
 the development checkout. Existing JARs, resources, voices and checkpoints are
 retained. No private output is committed.
 
-This session's deployment receipts, in deployment order, are:
+The November 9 deployment receipts, in deployment order, are:
 
 1. `deploy-20261109T124407890315Z/receipt.json` (subtitle helper, seventeen files).
 2. `deploy-20261109T131940033814Z/receipt.json` (video helper, eighteen files).
@@ -141,7 +150,7 @@ compilation but has not had another native visual run. No collision or gaze
 behavior was changed by this extension. The earlier failed record-mode startup
 dereferenced its intentionally absent caption dialog; its null guard is fixed.
 
-All eighteen deployed source/runtime hashes match. Seven preserved runtime
+All eighteen source/runtime hashes matched in that November 9 run. Seven preserved runtime
 scratch files and all sixty-seven pre-existing runtime Git-status entries were
 unchanged after execution. The private GMIT worklog hash was unchanged. Movie,
 PNG/WAV data, private assets and all receipts remain ignored local artifacts.

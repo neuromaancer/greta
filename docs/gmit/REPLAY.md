@@ -103,42 +103,17 @@ their timing evidence are stored in the ignored run directory. A failed Azure
 request stops the replay. Omit the option for fully local CereProc playback.
 The NetBeans profiles use their existing local CereProc route.
 
-## Seated rest variation preview
+## Seated hand rests
 
-Add `-MeaningMiner -VaryRestPoses` to the Windows PowerShell replay command
-to preview alternate seated arm rests. Hand safety must remain enabled.
-The first speaker begins with both palms angled inward and fingers slightly
-curled. The other two begin in a low crossed-wrist pose and a mixed tabletop/thigh pose when
-their respective avatar has a calibrated path. After each utterance the
-speaker selects a supported rest other than its most recent rest.
-`-RestSeed 711` is the default and makes these choices reproducible.
+All three actors start with both palms down on the table. Each actor returns
+to the same individually calibrated rest after speaking. The direct return
+has a four-frame finishing hold and a nominal 30-frame (1.2 s) movement. Hand,
+body and table checks also apply during the return. The native replay waits
+until the hands have reached rest before dispatching the next speaker. A film
+edited for a 600 ms speech gap has a separate timeline.
 
-MeaningMiner retains the original palms-down tabletop pose as its speech anchor.
-The inward-facing tabletop rest has its own checked path to and from that anchor.
-Each alternate rest uses an avatar-specific reversible path with 30 steps.
-Startup checks the quantized arm/hand poses and intermediate samples
-against the hand, torso, upper-arm, and seated thigh proxies. The rest
-paths also use the stock round table's finite slab and leg bounds. The speech
-collision model and the ordinary replay path retain their existing defaults.
-The mixed rest rounds its interior waypoints and holds its calibrated endpoints.
-This preview calibrates crossed hands for all three actors and mixed rests
-for patients A and B. The both-hands-on-thighs rest still needs a checked path.
-These proxy checks complement visual inspection of the supported poses.
-
-The native replay finishes the return to the tabletop anchor and any
-alternate rest transition before dispatching the next turn. A short video
-can separately overlap those captured arm motions and place consecutive
-audio events 600 ms apart. The 600 ms film timing is an edit of the fixed
-camera capture. It does not set the live replay interval. NetBeans keeps
-the ordinary replay behavior.
-
-The three-turn Jenny preview checked the opening rests, the facilitator's
-outgoing crossed rest, and the incoming transitions to the speech anchor.
-All configured paths passed the sampled proxy checks. The
-smallest margin was approximately 0.02 mm. This run did not exercise every outgoing
-rest or establish mesh-level collision clearance. Runtime deployment receipts
-remain under the ignored `bin/GMIT/local/` directory and can be passed to
-`integrations.gmit.deploy --rollback`.
+The earlier Jenny preview used alternate crossed-wrist, inward-facing and
+table/thigh rests. New recordings use the fixed tabletop pose.
 
 ## Local Pure backend
 
@@ -220,7 +195,8 @@ path. Playback/export evidence does not establish physical-audio completion.
 
 ## Deployment and recovery
 
-Only the 18 currently allowlisted runtime helpers are redeployed. Adapter Python,
+Only the twenty files in the deployment manifest are deployed. The Python
+adapter for Azure speech is included. The Pure generator, transcript importer,
 NetBeans source/configuration, and this documentation remain in `greta`.
 Transcripts and run receipts are local artifacts, not deployment-manifest
 entries. Preserve the complete package's existing resource files.

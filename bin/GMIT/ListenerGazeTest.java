@@ -72,8 +72,8 @@ public final class ListenerGazeTest {
             int nods = 0;
             for (long seed = 0; seed < 100; seed++) nods += ListenerGaze.planTiming(
                     "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0).nodCount();
-            require(nods >= 25 && nods <= 75,
-                    "100 adjacent seeds produce a non-degenerate 50% backchannel gate: " + nods);
+            require(nods >= 60 && nods <= 90,
+                    "100 adjacent seeds produce a non-degenerate 75% backchannel gate: " + nods);
             java.util.Map<String, Integer> counts = new java.util.HashMap<>();
             counts.put("facilitator", Integer.valueOf(0));
             counts.put("patient-b", Integer.valueOf(2));

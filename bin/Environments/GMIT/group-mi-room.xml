@@ -2,9 +2,9 @@
 <!-- Incrementally attached by SeatedScene; it never replaces the active Environment root. -->
 <node id="gmit-group-mi-room" camera_x="0.0" camera_y="1.5" camera_z="4.0" camera_pitch_degrees="-12.0">
     <!-- Seat metadata is consumed by SeatedScene; values are meters/degrees. -->
-    <!-- Distinct calibrated tabletop rests: close palms down, wider palms down, and asymmetric palms down. -->
+    <!-- Each actor returns to this calibrated palms-down tabletop rest. -->
     <!-- Arm and finger rests remain independent of face/lip/blink channels. -->
-    <seat actor_id="facilitator" gesture_admission="ideational-main" gesture_return="direct" tabletop_contact="true" gesture_style="balanced" gesture_release_lead="0.3" x="0.0" z="-0.78" yaw_degrees="0.0"
+    <seat actor_id="facilitator" gesture_admission="ideational-main" gesture_return="direct" tabletop_contact="true" gesture_style="facilitator" gesture_release_lead="0.3" x="0.0" z="-0.78" yaw_degrees="0.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
           l_shoulder_flexion_degrees="-55.897252" r_shoulder_flexion_degrees="-55.844001" l_shoulder_abduct_degrees="35.742250" r_shoulder_abduct_degrees="-35.064585"
           l_elbow_flexion_degrees="-38.567775" r_elbow_flexion_degrees="-38.553404" l_elbow_twisting_degrees="-9.703372" r_elbow_twisting_degrees="12.108072"
@@ -56,7 +56,7 @@
         <arm-joint name="l_thumb1_twisting" degrees="8.000000"/>
         <arm-joint name="r_thumb1_twisting" degrees="0.000000"/>
     </seat>
-    <seat actor_id="patient-a" gesture_admission="ideational-main" gesture_return="direct" tabletop_contact="true" gesture_style="reserved" x="-1.02" z="0.0" yaw_degrees="50.0"
+    <seat actor_id="patient-a" gesture_admission="ideational-main" gesture_return="direct" tabletop_contact="true" gesture_style="reflective" x="-1.02" z="0.0" yaw_degrees="50.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
           l_shoulder_flexion_degrees="-48.707140" r_shoulder_flexion_degrees="-49.438445" l_shoulder_abduct_degrees="-3.007563" r_shoulder_abduct_degrees="-9.575290"
           l_elbow_flexion_degrees="-31.772737" r_elbow_flexion_degrees="-32.652619" l_elbow_twisting_degrees="9.797320" r_elbow_twisting_degrees="-23.613890"
@@ -107,7 +107,7 @@
         <arm-joint name="l_thumb1_twisting" degrees="1.500000"/>
         <arm-joint name="r_thumb1_twisting" degrees="-1.250000"/>
     </seat>
-    <seat actor_id="patient-b" gesture_admission="ideational-main" gesture_return="direct" tabletop_contact="true" gesture_style="animated" x="1.02" z="0.0" yaw_degrees="-50.0"
+    <seat actor_id="patient-b" gesture_admission="ideational-main" gesture_return="direct" tabletop_contact="true" gesture_style="engaged" x="1.02" z="0.0" yaw_degrees="-50.0"
           root_vertical_mm="-430" hip_degrees="-88.0" knee_degrees="92.0" ankle_degrees="-5.0" sacroiliac_degrees="5.0"
           l_shoulder_flexion_degrees="-57.583606" r_shoulder_flexion_degrees="-41.165371" l_shoulder_abduct_degrees="49.738996" r_shoulder_abduct_degrees="-38.323467"
           l_elbow_flexion_degrees="-34.999434" r_elbow_flexion_degrees="-61.900817" l_elbow_twisting_degrees="-22.679864" r_elbow_twisting_degrees="16.571262"
