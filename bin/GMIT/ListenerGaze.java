@@ -24,8 +24,8 @@ public final class ListenerGaze {
     private static final int NOD_DURATION_FRAMES = 34; // 1.36 seconds: visible but still a single conversational bob.
     private static final int NOD_SETTLE_FRAMES = 2;
     private static final double NOD_PITCH_RADIANS = Math.toRadians(10);
-    private static final int NOD_TRIGGER_DENOMINATOR = 4;
-    private static final int NOD_TRIGGER_NUMERATOR = 3;
+    private static final int NOD_TRIGGER_DENOMINATOR = 8;
+    private static final int NOD_TRIGGER_NUMERATOR = 7;
     private static volatile Throwable failure;
     private static String speaker;
     private static Method currentFrame;

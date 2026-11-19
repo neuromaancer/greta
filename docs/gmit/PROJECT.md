@@ -16,7 +16,7 @@ A, and B; see [SUBTITLES.md](SUBTITLES.md). MeaningMiner remains opt-in through
 `-MeaningMiner`; subtitles alone do not enable semantic gestures. Current
 profiles give each speaker a different reach, tempo, fluidity and power.
 All actors start and finish with both palms down on the table. The nominal
-direct return takes 1.2 s. Each eligible turn has a 75% chance of one listener
+direct return takes 1.2 s. Each eligible turn has an 87.5% chance of one listener
 nod lasting 1.36 s. See [MeaningMiner](MEANING_MINER.md) for the gesture settings.
 The [six controlled transcript drafts](CONDITIONS.md) illustrate a proposed
 task/social by buddy/individualist 2 x 3 design. They are explicitly

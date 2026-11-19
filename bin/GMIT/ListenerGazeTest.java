@@ -70,10 +70,10 @@ public final class ListenerGazeTest {
         for (ListenerGaze.TimingEvent event : late.events()) require(event.start >= 101, "late scheduling does not write past frames");
         if (Boolean.parseBoolean(System.getProperty("gmit.gaze.backchannel", "true"))) {
             int nods = 0;
-            for (long seed = 0; seed < 100; seed++) nods += ListenerGaze.planTiming(
+            for (long seed = 0; seed < 1024; seed++) nods += ListenerGaze.planTiming(
                     "patient-a", "facilitator", "patient-b", 1000, 6000, seed, 0).nodCount();
-            require(nods >= 60 && nods <= 90,
-                    "100 adjacent seeds produce a non-degenerate 75% backchannel gate: " + nods);
+            require(nods >= 850 && nods <= 930,
+                    "1024 eligible turns should trigger a nod about seven times in eight: " + nods);
             java.util.Map<String, Integer> counts = new java.util.HashMap<>();
             counts.put("facilitator", Integer.valueOf(0));
             counts.put("patient-b", Integer.valueOf(2));

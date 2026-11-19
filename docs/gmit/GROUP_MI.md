@@ -185,7 +185,7 @@ translation and yaw, and smooths bounded head/eye turns over 18 Greta frames
 speaker takes priority at utterance end. The final head transition is scheduled
 inside the audio interval so it finishes as speech ends. Listener turns remain
 scheduled from the actual Audio start plus 200 ms. A deterministic seed controls
-an optional single listener nod per eligible turn (75% probability, 10-degree pitch).
+an optional single listener nod per eligible turn (87.5% probability, 10-degree pitch).
 Each nod lasts 1.36 seconds with a smooth onset and return. When a nod is
 triggered, the eligible listener with fewer scheduled nods in this session has
 priority; ties are resolved by the seeded random generator. The facilitator is

@@ -383,7 +383,7 @@ Do not schedule from BML dispatch: TTS latency is variable. Preserve the gaze
 timeline for prequeued speech frames and cover the bounded audio interval with
 neck/eye-only masks so older queued frames cannot restore the previous gaze.
 Gaze owns the cervical channels while enabled and composes a small listener nod
-into pitch. Seeded backchannels have a 75% chance on turns with enough time, at most one listener
+into pitch. Seeded backchannels have an 87.5% chance on turns with enough time, at most one listener
 nod per turn, after the initial gaze settles and before handoff/end. A nod lasts
 34 frames (1.36 seconds) with a ten-degree pitch peak and smooth onset and
 return. Among eligible listeners,
