@@ -469,7 +469,9 @@ Ogre pixels, without the separate subtitle dialog. The local
 `integrations.gmit.export_video` encoder produces an MP4 with scheduled WAV
 audio; it refuses partial captures by default and never overwrites output.
 Use `-MeaningMiner` explicitly when semantic gestures are wanted, and retain
-hand safety. See `docs/gmit/SUBTITLES.md`; output 25 fps does not prove capture
+hand safety. Use the complete seated three-person camera frame for study and
+demo videos, including speaker handoffs. Preserve speech speed when editing
+turn gaps. See `docs/gmit/SUBTITLES.md`; output 25 fps does not prove capture
 ran at that rate. Keep movies, frames, audio and receipts ignored locally.
 RL checkpoint selection requires existing development/validation evidence or an
 explicitly labelled provisional canonical choice; do not call an unavailable

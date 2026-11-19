@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -29,6 +30,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ThreadFactory;
+import greta.core.behaviorplanner.Planner;
 
 /**
  * Optional MeaningMiner bridge.  MeaningMiner turns deliberately use the
@@ -38,6 +40,7 @@ import java.util.concurrent.ThreadFactory;
 public final class MeaningMinerBridge {
     static final String VERSION = "gmit-meaning-miner/2";
     private static final boolean ENABLED = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.enabled", "false"));
+    private static final boolean BOOST_SPARSE_ACTIVATION = Boolean.parseBoolean(System.getProperty("gmit.meaningminer.boostActivation", "false"));
     private static final long TIMEOUT_SECONDS = 30L;
     private static final Object LOCK = new Object();
     private static final String DEBUG_NAME = "fml_output_mm.xml";
@@ -53,6 +56,8 @@ public final class MeaningMinerBridge {
     private static volatile boolean installed;
     private static final String[] ACTORS = { "facilitator", "patient-a", "patient-b" };
     private static final Map<String, ActorState> ACTOR_STATES = new LinkedHashMap<String, ActorState>();
+    private static final Map<Planner, MeaningMinerSparseActivationSelector> SPARSE_ACTIVATION_SELECTORS =
+            new WeakHashMap<Planner, MeaningMinerSparseActivationSelector>();
     private static final Map<String, PreparedTurn> PREPARED = new HashMap<String, PreparedTurn>();
     private static Object extractor;
     private static Method process;
@@ -138,7 +143,13 @@ public final class MeaningMinerBridge {
                 Class<?> composition = Class.forName("greta.core.util.enums.CompositionType", true, state.loader);
                 Object blend = composition.getField("blend").get(null);
                 Object mode = modeType.getConstructor(composition).newInstance(blend);
-                state.performIntentions.invoke(state.planner, turn.admittedIntentions, id, mode);
+                boolean boost = BOOST_SPARSE_ACTIVATION && turn.sparseAdmission && state.sparseActivationGate != null;
+                if (boost) state.sparseActivationGate.activate(actor, eventId, turn.admittedIntentions);
+                try {
+                    state.performIntentions.invoke(state.planner, turn.admittedIntentions, id, mode);
+                } finally {
+                    if (boost) state.sparseActivationGate.clear();
+                }
                 if (!turn.forwarded || turn.speechSignals != 1 || turn.realizerCalls != 1)
                     throw new IOException("MeaningMiner did not produce exactly one routed speech signal for " + key(actor, eventId));
                 turn.dispatched = true;
@@ -255,6 +266,7 @@ public final class MeaningMinerBridge {
 
     private static void restoreActorRoutes() {
         for (ActorState state : ACTOR_STATES.values()) {
+            if (state.sparseActivationGate != null) state.sparseActivationGate.clear();
             try { state.remove.invoke(state.planner, state.proxy); state.add.invoke(state.planner, state.realizer); }
             catch (Throwable ignored) { }
         }
@@ -300,6 +312,8 @@ public final class MeaningMinerBridge {
         Object manager = require(objects, "gmit-" + actor + "-manager");
         Object planner = require(objects, "gmit-" + actor + "-planner");
         final Object realizer = require(objects, "gmit-" + actor + "-realizer");
+        if (BOOST_SPARSE_ACTIVATION && !(planner instanceof Planner))
+            throw new IllegalStateException("MeaningMiner sparse activation requires the stock Planner API");
         verifyEnglish(manager);
         checkRequiredResources();
         final ClassLoader loader = manager.getClass().getClassLoader();
@@ -350,8 +364,22 @@ public final class MeaningMinerBridge {
         add.invoke(planner, proxy);
         state.performIntentions = planner.getClass().getMethod("performIntentions", List.class,
                 Class.forName("greta.core.util.id.ID", true, loader), Class.forName("greta.core.util.Mode", true, loader));
+        if (BOOST_SPARSE_ACTIVATION) {
+            state.sparseActivationGate = sparseActivationGate((Planner)planner);
+        }
         ACTOR_STATES.put(actor, state);
         if ("facilitator".equals(actor)) { extractor = localExtractor; process = state.process; }
+    }
+
+    /** Planner has no public removeSelector; reuse a weakly keyed inert selector. */
+    private static synchronized MeaningMinerSparseActivationSelector.Gate sparseActivationGate(Planner planner) {
+        MeaningMinerSparseActivationSelector selector = SPARSE_ACTIVATION_SELECTORS.get(planner);
+        if (selector == null) {
+            selector = new MeaningMinerSparseActivationSelector(new MeaningMinerSparseActivationSelector.Gate());
+            planner.addSelector(selector);
+            SPARSE_ACTIVATION_SELECTORS.put(planner, selector);
+        }
+        return selector.gate();
     }
 
     private static List<Object> filterSignals(ActorState state, List<Object> signals) throws Exception {
@@ -1018,6 +1046,7 @@ public final class MeaningMinerBridge {
     private static final class ActorState {
         final String actor; final ClassLoader loader; final Object planner, realizer, extractor; final Method process;
         Method performIntentions, add, remove; Object proxy; PreparedTurn active;
+        MeaningMinerSparseActivationSelector.Gate sparseActivationGate;
         ActorState(String actor, ClassLoader loader, Object planner, Object realizer, Object extractor, Method process) {
             this.actor = actor; this.loader = loader; this.planner = planner; this.realizer = realizer; this.extractor = extractor; this.process = process;
         }
@@ -1063,12 +1092,14 @@ public final class MeaningMinerBridge {
     }
     private static final class PreparedTurn {
         final String actor, eventId, text; final List<Object> rawIntentions, admittedIntentions; final List<String> schemaTypes; final List<String> gestureSignals = new ArrayList<String>();
+        final boolean sparseAdmission;
         boolean dispatched, forwarded; int speechSignals, realizerCalls;
         PreparedTurn(String actor, String eventId, String text, Admission admission, List<String> schemaTypes, String ignoredSpeechHash) {
             this.actor = actor; this.eventId = eventId; this.text = text;
             this.rawIntentions = admission.rawIntentions;
             this.admittedIntentions = admission.admittedIntentions;
             this.schemaTypes = Collections.unmodifiableList(new ArrayList<String>(schemaTypes));
+            this.sparseAdmission = "ideational-sparse".equals(admission.mode);
         }
     }
 }

@@ -67,6 +67,19 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m integrations.gmit.export_video \
 The two executable paths above are the existing local installation. Elsewhere,
 install FFmpeg/FFprobe with H.264 and AAC support and supply their actual paths
 or place them on `PATH`. The encoder itself uses Python's standard library.
+
+To retain the three-person wide shot throughout a paced demo, add
+`--turn-gap-ms 600 --lead-ms 1000 --end-hold-ms 2625` to the export command.
+Allow at least that much recorded footage after the last utterance.
+Use `--subtitle-output /absolute/path/demo.srt` for a sidecar on the same
+edited timeline, in the movie's directory. The encoder uses the full native camera frame at speaker
+changes. Speech keeps its recorded speed and the edit retimes silent handoffs.
+
+The seven-turn wide demo (`replay-20261119-122204-266`) exported at
+1920×1080 with six 600 ms gaps. A frame-by-frame check of the table and
+chairs detected the previous speaker cutaways and found the fixed framing
+throughout all 1,529 frames of this export. The seven scheduled utterance
+WAVs and the subtitle cue times matched the previous sparse demo.
 It creates `playback.mp4` and `video-export-receipt.json` in that run directory,
 refuses to overwrite output, and checks the encoded streams before publication.
 `--output /absolute/path/movie.mp4` selects another unused output filename.

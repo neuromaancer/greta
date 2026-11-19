@@ -1,7 +1,7 @@
 param(
     [switch]$Smoke, [switch]$GroupMI, [string]$Replay, [switch]$Preview, [switch]$Original, [string]$JavaHome,
     [switch]$DisableListenerGaze, [switch]$DisableListenerNods, [switch]$DisableTabletopArms,
-    [switch]$MeaningMiner, [switch]$DisableHandSafety,
+    [switch]$MeaningMiner, [switch]$BoostGestureActivation, [switch]$DisableHandSafety,
     [switch]$VaryRestPoses, [int]$RestSeed = 711,
     [switch]$Muted, [switch]$RecordVideo, [switch]$FullHD,
     [string]$AzurePython, [string]$AzureReplayFrom,
@@ -21,6 +21,12 @@ if ($RecordVideo -and ((-not ($GroupMI -or $Replay)) -or $Preview)) {
     throw '-RecordVideo requires a GroupMI/Replay run with speech.'
 }
 if ($FullHD -and -not $RecordVideo) { throw '-FullHD requires -RecordVideo.' }
+if ($BoostGestureActivation) {
+    if (-not $MeaningMiner -or ($GestureAdmission -and $GestureAdmission -ne 'ideational-sparse')) {
+        throw '-BoostGestureActivation requires -MeaningMiner with sparse gesture admission.'
+    }
+    $GestureAdmission = 'ideational-sparse'
+}
 if ($GestureAdmission -and -not $MeaningMiner) { throw '-GestureAdmission requires -MeaningMiner.' }
 if ($AzureReplayFrom) {
     if ($AzurePython -or -not ($GroupMI -or $Replay) -or $Preview -or
@@ -124,6 +130,7 @@ try {
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplaySubtitles.java') + '"')
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'ReplayVideo.java') + '"')
         $compileArgs += ('"' + (Join-Path $PSScriptRoot 'AzurePatientSpeech.java') + '"')
+        $compileArgs += ('"' + (Join-Path $PSScriptRoot 'MeaningMinerSparseActivationSelector.java') + '"')
         # Own the handle before starting: very short-lived javac processes can
         # otherwise lose their exit status in Windows PowerShell Start-Process.
         $compiler = New-Object System.Diagnostics.Process
@@ -146,6 +153,7 @@ try {
         if ($DisableListenerNods) { $arguments = @('-Dgmit.gaze.backchannel=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
+        if ($BoostGestureActivation) { $arguments = @('-Dgmit.meaningminer.boostActivation=true') + $arguments }
         if ($GestureAdmission) { $arguments = @(('-Dgmit.meaningminer.gesture.admission=' + $GestureAdmission)) + $arguments }
         if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }
         if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }

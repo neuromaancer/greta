@@ -59,6 +59,17 @@ while a gesture anchored to the action in *ended up ordering* can still be
 realized. The filter uses the words around the extracted cue, applies equally
 to all speakers, and leaves each actor's movement style and listener behavior intact.
 
+Add `-BoostGestureActivation` to modestly increase the chance that an
+already admitted sparse cue gets a gesture. The stock Planner applies its
+usual timing and overlap checks. In the matched seven-turn wide-camera
+replay, the logged gesture activation for each of the four cues rose from
+0.95 to 0.97. Four gestures were realized, compared with three in the prior
+sparse recording. The additional gesture accompanied A's concrete food cue
+in turn 2. Turns 4, 6 and 7 still contained speech without a semantic hand
+gesture. These counts describe the two recordings, not an expected gain per
+session. In the PowerShell launcher, `-MeaningMiner -BoostGestureActivation`
+selects sparse admission.
+
 The extractor uses utterance-wide word markers across sentence boundaries and
 reports the zero-based source token for each schema ID. Build the changed
 `auxiliary/MeaningMiner` module with the project's Java 8 toolchain. To deploy

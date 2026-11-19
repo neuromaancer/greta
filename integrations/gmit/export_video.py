@@ -57,6 +57,17 @@ class Capture:
     audio: tuple[Audio, ...]
 
 
+@dataclass(frozen=True)
+class ExportTimeline:
+    """An output timeline and its remapped scheduled-audio starts."""
+
+    frames: tuple[Frame, ...]
+    durations: tuple[float, ...]
+    duration_seconds: float
+    audio_starts_ms: tuple[int, ...]
+    presentation: dict[str, int | str]
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -213,7 +224,7 @@ def load_capture(run_dir: Path | str, *, allow_partial: bool = False) -> Capture
     return Capture(root, manifest_path, subtitles_path, status, width, height, target_fps, origin_ms, end_ms, tuple(frames), tuple(audio))
 
 
-def _timeline(capture: Capture) -> tuple[list[Frame], list[float], float]:
+def _timeline(capture: Capture) -> ExportTimeline:
     retained = [frame for frame in capture.frames if frame.timer_ms >= capture.origin_ms]
     prior = [frame for frame in capture.frames if frame.timer_ms <= capture.origin_ms]
     first = prior[-1]
@@ -227,7 +238,147 @@ def _timeline(capture: Capture) -> tuple[list[Frame], list[float], float]:
     durations.append((capture.end_ms - retained[-1].timer_ms) / 1000.0)
     if any(duration <= 0 for duration in durations):
         raise VideoExportError("frame timeline has a non-positive duration")
-    return retained, durations, (capture.end_ms - capture.origin_ms) / 1000.0
+    return ExportTimeline(
+        tuple(retained),
+        tuple(durations),
+        (capture.end_ms - capture.origin_ms) / 1000.0,
+        tuple(item.start_ms - capture.origin_ms for item in capture.audio),
+        {"mode": "captured"},
+    )
+
+
+def _frames_inside(capture: Capture, *, start_ms: int, end_ms: int, strict_start: bool) -> list[Frame]:
+    if end_ms <= start_ms:
+        raise VideoExportError("presentation source interval must have positive duration")
+    return [
+        frame for frame in capture.frames
+        if (frame.timer_ms > start_ms if strict_start else frame.timer_ms >= start_ms)
+        and frame.timer_ms < end_ms
+    ]
+
+
+def _opening_frame(capture: Capture) -> Frame:
+    """Use the optional pre-speech room view when it is available and valid."""
+    opening = capture.run_dir / "00-scene.ppm"
+    if not opening.is_file() or opening.is_symlink():
+        prior = [frame for frame in capture.frames if frame.timer_ms < capture.origin_ms]
+        if not prior:
+            raise VideoExportError("paced export needs 00-scene.ppm or a caption-free frame before the first audio")
+        return prior[-1]
+    return Frame(opening.resolve(), capture.origin_ms)
+
+
+def _append_point(points: list[Frame], frame: Frame, timer_ms: int) -> None:
+    if points and timer_ms < points[-1].timer_ms:
+        raise VideoExportError("presentation timeline is not increasing")
+    if points and timer_ms == points[-1].timer_ms:
+        points[-1] = Frame(frame.path, timer_ms)
+        return
+    points.append(Frame(frame.path, timer_ms))
+
+
+def _append_source_segment(
+    points: list[Frame], capture: Capture, *, source_start_ms: int, source_end_ms: int,
+    output_start_ms: int, output_duration_ms: int | None = None, strict_start: bool,
+) -> None:
+    """Map one continuous, full-camera source interval to an output interval."""
+    if source_end_ms <= source_start_ms:
+        raise VideoExportError("presentation source segment must have positive duration")
+    source_duration_ms = source_end_ms - source_start_ms
+    duration_ms = source_duration_ms if output_duration_ms is None else output_duration_ms
+    if duration_ms <= 0:
+        raise VideoExportError("presentation output segment must have positive duration")
+    observed = _frames_inside(capture, start_ms=source_start_ms, end_ms=source_end_ms, strict_start=strict_start)
+    if not observed:
+        label = "silent interval" if strict_start else "speech interval"
+        raise VideoExportError(f"paced export has no captured full-camera frame inside a {label}")
+    first = observed[0]
+    _append_point(points, first, output_start_ms)
+    for frame in observed[1:]:
+        offset_ms = (frame.timer_ms - source_start_ms if output_duration_ms is None
+                     else round((frame.timer_ms - source_start_ms) * duration_ms / source_duration_ms))
+        _append_point(points, frame, output_start_ms + offset_ms)
+    # Holding the final observed frame covers the small capture-to-boundary
+    # interval. The following segment replaces this boundary point with its own
+    # first safe frame, so an old subtitle cannot enter the next utterance.
+    _append_point(points, observed[-1], output_start_ms + duration_ms)
+
+
+def _paced_timeline(
+    capture: Capture, *, turn_gap_ms: int, lead_ms: int, end_hold_ms: int | None
+) -> ExportTimeline:
+    """Compress inter-turn silence while retaining only native full-camera frames.
+
+    Each utterance retains its observed native frames and its own burned-in cue.
+    Each silent interval maps its complete observed source interval into the
+    requested gap. This speeds up return motion when necessary and avoids a
+    jump from a held pose to an already-restored pose.
+    """
+    if turn_gap_ms < 0 or lead_ms < 0 or (end_hold_ms is not None and end_hold_ms < 0):
+        raise VideoExportError("presentation timing values must be non-negative")
+    available_tail_ms = capture.end_ms - capture.audio[-1].end_ms
+    hold_ms = available_tail_ms if end_hold_ms is None else end_hold_ms
+    if hold_ms > available_tail_ms:
+        raise VideoExportError("requested end hold exceeds the captured post-speech interval")
+    points: list[Frame] = []
+    if lead_ms:
+        _append_point(points, _opening_frame(capture), 0)
+    output_starts: list[int] = []
+    output_cursor = lead_ms
+    for index, item in enumerate(capture.audio):
+        output_starts.append(output_cursor)
+        _append_source_segment(
+            points,
+            capture,
+            source_start_ms=item.start_ms,
+            source_end_ms=item.end_ms,
+            output_start_ms=output_cursor,
+            strict_start=False,
+        )
+        output_cursor += item.end_ms - item.start_ms
+        if index == len(capture.audio) - 1:
+            continue
+        next_item = capture.audio[index + 1]
+        if turn_gap_ms:
+            _append_source_segment(
+                points,
+                capture,
+                source_start_ms=item.end_ms,
+                source_end_ms=next_item.start_ms,
+                output_start_ms=output_cursor,
+                output_duration_ms=turn_gap_ms,
+                strict_start=True,
+            )
+        output_cursor += turn_gap_ms
+    if hold_ms:
+        last = capture.audio[-1]
+        _append_source_segment(
+            points,
+            capture,
+            source_start_ms=last.end_ms,
+            source_end_ms=last.end_ms + hold_ms,
+            output_start_ms=output_cursor,
+            output_duration_ms=hold_ms,
+            strict_start=True,
+        )
+        output_cursor += hold_ms
+    if len(points) < 2:
+        raise VideoExportError("presentation timeline needs at least two points")
+    durations = tuple((points[index + 1].timer_ms - frame.timer_ms) / 1000.0 for index, frame in enumerate(points[:-1]))
+    if any(duration <= 0 for duration in durations):
+        raise VideoExportError("presentation timeline has a non-positive duration")
+    return ExportTimeline(
+        tuple(points[:-1]),
+        durations,
+        output_cursor / 1000.0,
+        tuple(output_starts),
+        {
+            "mode": "wide-paced",
+            "turn_gap_millis": turn_gap_ms,
+            "lead_millis": lead_ms,
+            "end_hold_millis": hold_ms,
+        },
+    )
 
 
 def _concat_quote(path: Path) -> str:
@@ -256,23 +407,28 @@ def _probe_json(ffprobe: str, path: Path, *, timeout_seconds: float, entries: st
 
 
 def _verify_frame_dimensions(capture: Capture) -> None:
-    ppm_header = f"P6\n{capture.width} {capture.height}\n255\n".encode("ascii")
     for frame in capture.frames:
-        try:
-            with frame.path.open("rb") as handle:
-                if frame.path.suffix == ".ppm":
-                    if (handle.read(len(ppm_header)) != ppm_header
-                            or os.fstat(handle.fileno()).st_size != len(ppm_header) + 3 * capture.width * capture.height):
-                        raise VideoExportError(f"invalid packed RGB frame for capture dimensions: {frame.path.name}")
-                    continue
-                header = handle.read(24)
-        except OSError as exc:
-            raise VideoExportError(f"cannot read frame: {frame.path.name}") from exc
-        if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
-            raise VideoExportError(f"frame is not a PNG with IHDR: {frame.path.name}")
-        width, height = struct.unpack(">II", header[16:24])
-        if width != capture.width or height != capture.height:
-            raise VideoExportError(f"frame dimensions differ from capture contract: {frame.path.name}")
+        _verify_frame_path_dimensions(frame.path, capture.width, capture.height)
+
+
+def _verify_frame_path_dimensions(path: Path, width: int, height: int) -> None:
+    """Validate one PNG or packed-RGB PPM against the capture dimensions."""
+    ppm_header = f"P6\n{width} {height}\n255\n".encode("ascii")
+    try:
+        with path.open("rb") as handle:
+            if path.suffix == ".ppm":
+                if (handle.read(len(ppm_header)) != ppm_header
+                        or os.fstat(handle.fileno()).st_size != len(ppm_header) + 3 * width * height):
+                    raise VideoExportError(f"invalid packed RGB frame for capture dimensions: {path.name}")
+                return
+            header = handle.read(24)
+    except OSError as exc:
+        raise VideoExportError(f"cannot read frame: {path.name}") from exc
+    if len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        raise VideoExportError(f"frame is not a PNG with IHDR: {path.name}")
+    actual_width, actual_height = struct.unpack(">II", header[16:24])
+    if actual_width != width or actual_height != height:
+        raise VideoExportError(f"frame dimensions differ from capture contract: {path.name}")
 
 
 def _publish_no_clobber(source: Path, destination: Path, *, label: str) -> None:
@@ -290,6 +446,62 @@ def _interval_stats(frames: Iterable[Frame]) -> dict[str, float | int | None]:
     return {"frame_count": len(values), "interval_count": len(intervals), "min_ms": min(intervals) if intervals else None, "max_ms": max(intervals) if intervals else None, "mean_ms": (sum(intervals) / len(intervals)) if intervals else None}
 
 
+def _srt_timestamp(millis: int) -> str:
+    if millis < 0:
+        raise VideoExportError("subtitle timestamp must be non-negative")
+    hours, remainder = divmod(millis, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1_000)
+    return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
+
+
+def _aligned_srt(capture: Capture, audio_starts_ms: tuple[int, ...]) -> str:
+    """Create a sidecar whose cues match a paced output audio schedule."""
+    subtitles = _load_json(capture.subtitles_path, "subtitles.json")
+    cues = subtitles["cues"]
+    if len(cues) != len(capture.audio) or len(audio_starts_ms) != len(capture.audio):
+        raise VideoExportError("cannot create aligned SRT without one cue per audio event")
+    display_names = {"facilitator": "Facilitator", "patient-a": "A", "patient-b": "B"}
+    blocks: list[str] = []
+    for index, (cue, audio, start_ms) in enumerate(zip(cues, capture.audio, audio_starts_ms), 1):
+        duration_ms = audio.end_ms - audio.start_ms
+        speaker = display_names.get(audio.actor_id)
+        if speaker is None:
+            raise VideoExportError(f"unknown subtitle actor: {audio.actor_id}")
+        text = " ".join(cue["text"].split()).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        blocks.append(
+            f"{index}\n{_srt_timestamp(start_ms)} --> {_srt_timestamp(start_ms + duration_ms)}\n{speaker}: {text}"
+        )
+    return "\n\n".join(blocks) + "\n"
+
+
+def _concat_compatible_frames(
+    frames: tuple[Frame, ...], *, temp: Path, ffmpeg: str, width: int, height: int, timeout_seconds: float
+) -> tuple[Frame, ...]:
+    """Convert only a PPM opening still when standard capture frames are PNG.
+
+    The concat demuxer chooses one image decoder. Standard captures may retain
+    a PPM ``00-scene`` still for the quiet lead while all timed frames are PNG.
+    Conversion occurs in the export temporary directory, leaving capture evidence
+    unchanged. Full-HD PPM captures already have a uniform input format.
+    """
+    suffixes = {frame.path.suffix.lower() for frame in frames}
+    if len(suffixes) == 1:
+        return frames
+    opening = frames[0]
+    following = {frame.path.suffix.lower() for frame in frames[1:]}
+    if opening.path.name != "00-scene.ppm" or opening.path.suffix.lower() != ".ppm" or following != {".png"}:
+        raise VideoExportError("presentation timeline mixes unsupported image formats")
+    converted = temp / "opening.png"
+    _run(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-xerror", "-i", str(opening.path),
+         "-frames:v", "1", "-c:v", "png", "-pix_fmt", "rgb24", str(converted)],
+        timeout_seconds=timeout_seconds,
+    )
+    _verify_frame_path_dimensions(converted, width, height)
+    return tuple(Frame(converted if frame is opening else frame.path, frame.timer_ms) for frame in frames)
+
+
 def export_video(
     run_dir: Path | str,
     *,
@@ -298,6 +510,10 @@ def export_video(
     ffprobe: str = "ffprobe",
     timeout_seconds: float = 300.0,
     allow_partial: bool = False,
+    turn_gap_ms: int | None = None,
+    lead_ms: int = 1000,
+    end_hold_ms: int | None = None,
+    subtitle_output: Path | str | None = None,
 ) -> Path:
     """Encode, probe, receipt, and atomically publish a capture MP4."""
     if timeout_seconds <= 0:
@@ -312,31 +528,54 @@ def export_video(
     receipt_path = output_path.with_name("video-export-receipt.json")
     if receipt_path.exists() or receipt_path.is_symlink():
         raise VideoExportError(f"refusing to overwrite existing receipt: {receipt_path}")
+    if receipt_path == output_path:
+        raise VideoExportError("output filename conflicts with the fixed receipt filename")
+    subtitle_path: Path | None = None
+    if subtitle_output is not None:
+        subtitle_path = Path(subtitle_output).expanduser().resolve()
+        if subtitle_path.exists() or subtitle_path.is_symlink():
+            raise VideoExportError(f"refusing to overwrite existing subtitle output: {subtitle_path}")
+        if not subtitle_path.parent.is_dir():
+            raise VideoExportError("subtitle output parent directory does not exist")
+        if subtitle_path.parent != output_path.parent:
+            raise VideoExportError("subtitle output must be a sibling of the movie so publication stays atomic")
+        if subtitle_path in {output_path, receipt_path}:
+            raise VideoExportError("subtitle output conflicts with movie or receipt destination")
     if shutil.which(ffmpeg) is None or shutil.which(ffprobe) is None:
         raise VideoExportError("ffmpeg and ffprobe must be available on PATH or supplied explicitly")
+    if turn_gap_ms is None and (lead_ms != 1000 or end_hold_ms is not None):
+        raise VideoExportError("--lead-ms and --end-hold-ms require --turn-gap-ms")
     _verify_frame_dimensions(capture)
-    frames, durations, video_duration = _timeline(capture)
+    timeline = _timeline(capture) if turn_gap_ms is None else _paced_timeline(
+        capture, turn_gap_ms=turn_gap_ms, lead_ms=lead_ms, end_hold_ms=end_hold_ms
+    )
+    if timeline.presentation["mode"] == "wide-paced" and timeline.presentation["lead_millis"]:
+        _verify_frame_path_dimensions(_opening_frame(capture).path, capture.width, capture.height)
     with tempfile.TemporaryDirectory(prefix="gmit-video-", dir=output_path.parent) as temp_name:
         temp = Path(temp_name)
+        concat_frames = _concat_compatible_frames(
+            timeline.frames, temp=temp, ffmpeg=ffmpeg, width=capture.width, height=capture.height,
+            timeout_seconds=timeout_seconds,
+        )
         concat = temp / "frames.concat"
         lines: list[str] = []
-        for frame, duration in zip(frames, durations):
+        for frame, duration in zip(concat_frames, timeline.durations):
             lines.extend((f"file {_concat_quote(frame.path)}", f"duration {duration:.6f}"))
-        lines.append(f"file {_concat_quote(frames[-1].path)}")
+        lines.append(f"file {_concat_quote(concat_frames[-1].path)}")
         concat.write_text("\n".join(lines) + "\n", encoding="utf-8")
         temp_output = temp / "playback.mp4"
         command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-xerror", "-f", "concat", "-safe", "0", "-i", str(concat)]
         for item in capture.audio:
             command.extend(("-i", str(item.path)))
-        filter_parts = [f"anullsrc=r=48000:cl=stereo:d={video_duration:.6f}[bed]"]
+        filter_parts = [f"anullsrc=r=48000:cl=stereo:d={timeline.duration_seconds:.6f}[bed]"]
         labels = ["[bed]"]
         for index, item in enumerate(capture.audio, 1):
-            delay = item.start_ms - capture.origin_ms
+            delay = timeline.audio_starts_ms[index - 1]
             label = f"[a{index}]"
             filter_parts.append(f"[{index}:a]adelay={delay}:all=1{label}")
             labels.append(label)
         filter_parts.append("".join(labels) + f"amix=inputs={len(labels)}:duration=first:dropout_transition=0:normalize=0[aout]")
-        command.extend(("-filter_complex", ";".join(filter_parts), "-map", "0:v:0", "-map", "[aout]", "-vf", f"fps={capture.target_fps}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-t", f"{video_duration:.6f}", str(temp_output)))
+        command.extend(("-filter_complex", ";".join(filter_parts), "-map", "0:v:0", "-map", "[aout]", "-vf", f"fps={capture.target_fps}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-t", f"{timeline.duration_seconds:.6f}", str(temp_output)))
         _run(command, timeout_seconds=timeout_seconds)
         final = _probe_json(ffprobe, temp_output, timeout_seconds=timeout_seconds, entries="format=duration:stream=codec_type,duration")
         streams = final.get("streams")
@@ -346,7 +585,7 @@ def export_video(
             actual_duration = float(final["format"]["duration"])
         except (KeyError, TypeError, ValueError) as exc:
             raise VideoExportError("encoded file has no measurable duration") from exc
-        if abs(actual_duration - video_duration) > max(0.25, 1.0 / capture.target_fps + 0.1):
+        if abs(actual_duration - timeline.duration_seconds) > max(0.25, 1.0 / capture.target_fps + 0.1):
             raise VideoExportError("encoded duration does not match the capture timeline")
         stream_tolerance = max(0.25, 1.0 / capture.target_fps + 0.1)
         for stream in streams:
@@ -356,8 +595,8 @@ def export_video(
                 stream_duration = float(stream["duration"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise VideoExportError("encoded stream has no measurable duration") from exc
-            if abs(stream_duration - video_duration) > stream_tolerance:
-                raise VideoExportError(f"encoded {stream.get('codec_type')} duration {stream_duration:.6f}s does not match capture timeline {video_duration:.6f}s")
+            if abs(stream_duration - timeline.duration_seconds) > stream_tolerance:
+                raise VideoExportError(f"encoded {stream.get('codec_type')} duration {stream_duration:.6f}s does not match presentation timeline {timeline.duration_seconds:.6f}s")
         receipt = {
             "schema_version": 1,
             "status": "completed",
@@ -366,16 +605,37 @@ def export_video(
             "manifest_sha256": _sha256(capture.manifest_path),
             "subtitles_sha256": _sha256(capture.subtitles_path),
             "capture_status": capture.status,
-            "video_duration_seconds": video_duration,
+            "video_duration_seconds": timeline.duration_seconds,
             "encoded_duration_seconds": actual_duration,
             "frame_capture_intervals_millis": _interval_stats(capture.frames),
+            "presentation_timeline": timeline.presentation,
+            "aligned_subtitle_output": str(subtitle_path) if subtitle_path is not None else None,
             "audio": [{"event_id": item.event_id, "actor_id": item.actor_id, "file": item.path.name, "sha256": _sha256(item.path), "scheduled_duration_millis": item.end_ms - item.start_ms, "pcm_duration_millis": item.pcm_duration_ms} for item in capture.audio],
             "tools": {"ffmpeg": ffmpeg, "ffprobe": ffprobe},
         }
         temp_receipt = temp / "video-export-receipt.json"
         temp_receipt.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        _publish_no_clobber(temp_output, output_path, label="output")
-        _publish_no_clobber(temp_receipt, receipt_path, label="receipt")
+        temp_subtitle: Path | None = None
+        if subtitle_path is not None:
+            temp_subtitle = temp / "aligned.srt"
+            temp_subtitle.write_text(_aligned_srt(capture, timeline.audio_starts_ms), encoding="utf-8")
+        published: list[tuple[Path, Path]] = []
+        try:
+            _publish_no_clobber(temp_output, output_path, label="output")
+            published.append((temp_output, output_path))
+            _publish_no_clobber(temp_receipt, receipt_path, label="receipt")
+            published.append((temp_receipt, receipt_path))
+            if temp_subtitle is not None and subtitle_path is not None:
+                _publish_no_clobber(temp_subtitle, subtitle_path, label="subtitle output")
+                published.append((temp_subtitle, subtitle_path))
+        except Exception:
+            for source, destination in reversed(published):
+                try:
+                    if destination.exists() and os.path.samefile(source, destination):
+                        destination.unlink()
+                except OSError:
+                    pass
+            raise
     return output_path
 
 
@@ -387,9 +647,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ffprobe", default="ffprobe")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--allow-partial", action="store_true")
+    parser.add_argument("--turn-gap-ms", type=int,
+                        help="Create a full-camera presentation edit with this silence between turns")
+    parser.add_argument("--lead-ms", type=int, default=1000,
+                        help="Silent full-camera lead used with --turn-gap-ms, default 1000")
+    parser.add_argument("--end-hold-ms", type=int,
+                        help="Post-speech full-camera hold used with --turn-gap-ms, default keeps captured hold")
+    parser.add_argument("--subtitle-output", type=Path,
+                        help="Write an SRT aligned to the exported audio schedule")
     args = parser.parse_args(argv)
     try:
-        output = export_video(args.run_dir, output=args.output, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, timeout_seconds=args.timeout_seconds, allow_partial=args.allow_partial)
+        output = export_video(args.run_dir, output=args.output, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe,
+                              timeout_seconds=args.timeout_seconds, allow_partial=args.allow_partial,
+                              turn_gap_ms=args.turn_gap_ms, lead_ms=args.lead_ms, end_hold_ms=args.end_hold_ms,
+                              subtitle_output=args.subtitle_output)
     except (VideoExportError, OSError) as exc:
         print(f"video export failed: {exc}", file=os.sys.stderr)
         return 2
