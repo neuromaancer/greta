@@ -52,6 +52,13 @@ a unit speech-only. It preserves the extracted candidates in the audit log.
 Compare admitted IDs and realized signals separately because Greta's Planner
 also performs stochastic selection.
 
+Use `-MeaningMiner -GestureAdmission ideational-sparse` for a quieter replay.
+It starts with the grounded selection and can leave a whole turn speech-only.
+For example, an OBJECT attached to *feel that way* adds little to a reflection,
+while a gesture anchored to the action in *ended up ordering* can still be
+realized. The filter uses the words around the extracted cue, applies equally
+to all speakers, and leaves each actor's movement style and listener behavior intact.
+
 The extractor uses utterance-wide word markers across sentence boundaries and
 reports the zero-based source token for each schema ID. Build the changed
 `auxiliary/MeaningMiner` module with the project's Java 8 toolchain. To deploy
@@ -74,6 +81,13 @@ one UP and one ENABLEMENT). The grounded English policy realized seven
 action already extracted in that sentence and suppressed three OBJECT
 candidates anchored to a reporting verb. These counts describe one recording
 per policy. Perceived semantic fit still requires viewer judgment.
+
+The matched sparse run (`replay-20261119-115338-741`) extracted the same 29
+candidates. It admitted four and realized three (one OBJECT and two ENABLEMENT).
+Turns 4, 6 and 7 had no admitted gesture. On turn 2, the OBJECT was still
+admitted, but Planner emitted only speech. This accounts for the fourth
+speech-only turn in the movie. B's action cue on turn 3 and all three
+actor expressivity profiles were preserved.
 
 ## Seated adaptation and ownership
 

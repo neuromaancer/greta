@@ -33,7 +33,7 @@ public final class MeaningMinerBridgeTest {
         expectIo(() -> MeaningMinerBridge.validateEmissionKinds(Arrays.asList("SpeechSignal"), 2));
         semanticAdmission();
         timeoutRestoresDiagnostic();
-        System.out.println("PASS xml_escape event_id text_boundary image_schema_filter semantic_admission grounded_admission");
+        System.out.println("PASS xml_escape event_id text_boundary image_schema_filter semantic_admission grounded_admission sparse_admission");
     }
     private static void semanticAdmission() throws Exception {
         String global = "gmit.meaningminer.gesture.admission";
@@ -93,6 +93,64 @@ public final class MeaningMinerBridgeTest {
             List<Object> literalPhrase = MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, literalUp, literal, otherAction),
                     Arrays.asList("look", "up", "ordering"), indexes("im-literal-up", 1, "im-other-action", 2));
             require(literalPhrase.contains(literal) && !literalPhrase.contains(otherAction), "preserve literal directional up");
+
+            System.setProperty(global, "ideational-sparse");
+            IdeationalUnit formulaWayUnit = new IdeationalUnit("u7", new Marker("tm0"), new Marker("tm2"));
+            formulaWayUnit.setMainIntentionId("im-way");
+            GroundedSchema formulaWay = new GroundedSchema("imageschema", "object", "im-way", "tm2");
+            List<Object> formulaWayAdmission = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, formulaWayUnit, formulaWay), Arrays.asList("feel", "that", "way"), indexes("im-way", 2));
+            require(formulaWayAdmission.equals(Arrays.<Object>asList(speech)), "sparse suppresses formulaic feel that way object and orphaned unit");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, formulaWayUnit, formulaWay),
+                    Arrays.asList("feel", ".", "That", "way"), indexes("im-way", 3)).contains(formulaWay),
+                    "sparse does not match feel and that way across a sentence boundary");
+
+            IdeationalUnit formulaTimeUnit = new IdeationalUnit("u8", new Marker("tm0"), new Marker("tm1"));
+            formulaTimeUnit.setMainIntentionId("im-time");
+            GroundedSchema formulaTime = new GroundedSchema("imageschema", "object", "im-time", "tm1");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, formulaTimeUnit, formulaTime),
+                    Arrays.asList("one", "time"), indexes("im-time", 1)).equals(Arrays.<Object>asList(speech)),
+                    "sparse suppresses formulaic one time object");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, formulaTimeUnit, formulaTime),
+                    Arrays.asList("one", "time", "zone"), indexes("im-time", 1)).contains(formulaTime),
+                    "sparse preserves time used within a concrete compound");
+
+            IdeationalUnit attemptUnit = new IdeationalUnit("u9", new Marker("tm0"), new Marker("tm2"));
+            attemptUnit.setMainIntentionId("im-attempt");
+            GroundedSchema attempt = new GroundedSchema("imageschema", "object", "im-attempt", "tm0");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, attemptUnit, attempt),
+                    Arrays.asList("trying", "something", "new"), indexes("im-attempt", 0)).equals(Arrays.<Object>asList(speech)),
+                    "sparse suppresses generic trying something new object");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, attemptUnit, attempt),
+                    Arrays.asList("trying", "something", "spicy"), indexes("im-attempt", 0)).contains(attempt),
+                    "sparse preserves attempts outside the supported phrase");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, attemptUnit, attempt),
+                    Arrays.asList("trying", "something", ".", "New", "ideas"), indexes("im-attempt", 0)).contains(attempt),
+                    "sparse does not complete the phrase with a word from the following sentence");
+
+            IdeationalUnit literalWayUnit = new IdeationalUnit("u10", new Marker("tm0"), new Marker("tm2"));
+            literalWayUnit.setMainIntentionId("im-literal-way");
+            GroundedSchema literalWay = new GroundedSchema("imageschema", "object", "im-literal-way", "tm1");
+            List<Object> literalWayAdmission = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, literalWayUnit, literalWay), Arrays.asList("the", "way", "home"), indexes("im-literal-way", 1));
+            require(literalWayAdmission.contains(literalWay), "sparse preserves literal way object outside formulaic context");
+
+            IdeationalUnit meatUnit = new IdeationalUnit("u11", new Marker("tm0"), new Marker("tm1"));
+            meatUnit.setMainIntentionId("im-meat");
+            GroundedSchema meat = new GroundedSchema("imageschema", "object", "im-meat", "tm1");
+            List<Object> meatAdmission = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, meatUnit, meat), Arrays.asList("red", "meat"), indexes("im-meat", 1));
+            require(meatAdmission.contains(meat), "sparse preserves concrete meat object");
+
+            IdeationalUnit orderingUnit = new IdeationalUnit("u12", new Marker("tm0"), new Marker("tm1"));
+            orderingUnit.setMainIntentionId("im-report");
+            GroundedSchema report = new GroundedSchema("imageschema", "object", "im-report", "tm0");
+            GroundedSchema orderingSparse = new GroundedSchema("imageschema", "enablement", "im-ordering-sparse", "tm1");
+            List<Object> orderingAdmission = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, orderingUnit, report, orderingSparse), Arrays.asList("said", "ordering"),
+                    indexes("im-report", 0, "im-ordering-sparse", 1));
+            require(orderingAdmission.contains(orderingSparse) && !orderingAdmission.contains(report),
+                    "sparse retains a same-unit grounded enablement alternative");
             List<Object> invalid = Arrays.<Object>asList(speech, new IdeationalUnit("u2", "missing"), main, secondary);
             require(MeaningMinerBridge.admittedIntentions("patient-a", invalid).equals(invalid), "invalid main anchor preserves complete raw turn");
             System.setProperty(global, "unsupported");

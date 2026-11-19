@@ -443,7 +443,8 @@ public final class SeatedScene {
             this.style = style;
             if (releaseLead < 0 || releaseLead > .5) throw new IllegalArgumentException("Invalid gesture release lead");
             this.releaseLead = releaseLead;
-            if (!"all".equals(admission) && !"ideational-main".equals(admission) && !"ideational-grounded".equals(admission))
+            if (!"all".equals(admission) && !"ideational-main".equals(admission)
+                    && !"ideational-grounded".equals(admission) && !"ideational-sparse".equals(admission))
                 throw new IllegalArgumentException("Invalid gesture admission policy: " + admission);
             this.admission = admission;
             if (!"workspace".equals(returnMode) && !"direct".equals(returnMode))

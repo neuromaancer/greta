@@ -5,7 +5,7 @@ param(
     [switch]$VaryRestPoses, [int]$RestSeed = 711,
     [switch]$Muted, [switch]$RecordVideo, [switch]$FullHD,
     [string]$AzurePython, [string]$AzureReplayFrom,
-    [ValidateSet('all','ideational-main','ideational-grounded')][string]$GestureAdmission,
+    [ValidateSet('all','ideational-main','ideational-grounded','ideational-sparse')][string]$GestureAdmission,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,

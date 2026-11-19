@@ -542,9 +542,12 @@ public final class MeaningMinerBridge {
         List<String> suppressed = new ArrayList<String>();
         Set<String> admittedSet = anchors;
         String reason = "main-anchors";
-        if ("ideational-grounded".equals(mode)) {
+        boolean sparse = "ideational-sparse".equals(mode);
+        boolean grounded = sparse || "ideational-grounded".equals(mode);
+        if (grounded) {
             for (IdeationalUnitGroup unit : units) {
                 SchemaIntention selected = selectGroundedSchema(unit, schemas.get(unit.mainId));
+                if (sparse && sparseFormulaicObject(selected, markerTokens)) selected = null;
                 if (selected != null) {
                     selectedMainIds.put(unit.value, selected.id);
                     if (!selected.id.equals(unit.mainId)) remaps.add(unit.mainId + "->" + selected.id + "@" + sourceAudit(selected));
@@ -554,7 +557,8 @@ public final class MeaningMinerBridge {
                 }
             }
             admittedSet = new LinkedHashSet<String>(selectedMainIds.values());
-            reason = schemaTokenIndexes.isEmpty() ? "source-map-unavailable-main-anchors" : "grounded-main-or-specific";
+            reason = sparse ? "sparse-grounded-main-or-specific" : "grounded-main-or-specific";
+            if (schemaTokenIndexes.isEmpty()) reason = "source-map-unavailable-main-anchors";
         }
 
         List<Object> admitted = new ArrayList<Object>();
@@ -562,7 +566,7 @@ public final class MeaningMinerBridge {
         for (Object value : raw) {
             String name = requiredStringMethod(value, "getName");
             if ("ideationalunit".equalsIgnoreCase(name)) {
-                if ("ideational-grounded".equals(mode)) {
+                if (grounded) {
                     if (selectedMainIds.containsKey(value)) admitted.add(remappedIdeationalUnit(value, selectedMainIds.get(value)));
                     // A grounded policy may suppress an ungrounded generic main.  Its
                     // unit must leave with it: Planner cannot receive an orphan anchor.
@@ -617,6 +621,25 @@ public final class MeaningMinerBridge {
 
     private static boolean genericObjectCue(String token) {
         return isOneOf(normalizeToken(token), "say", "says", "said", "tell", "told", "ask", "asked", "express", "expressed");
+    }
+    /**
+     * A stricter local-context filter for sparse comparison playback. It only
+     * rejects OBJECT anchors whose marked words form an abstract formula; other
+     * grounded literals, including food and same-unit ENABLEMENT alternatives,
+     * retain the normal grounded admission behavior.
+     */
+    private static boolean sparseFormulaicObject(SchemaIntention schema, List<String> tokens) {
+        if (schema == null || !"object".equals(normalizeSchemaType(schema.type))) return false;
+        int index = schema.sourceIndex;
+        String word = normalizeToken(schema.token);
+        if ("way".equals(word)) {
+            return "that".equals(normalizeToken(schema.previousToken))
+                    && isOneOf(normalizeToken(markerToken(tokens, index - 2)), "feel", "feels", "feeling", "felt");
+        }
+        String next = normalizeToken(markerToken(tokens, index + 1));
+        if ("time".equals(word)) return "one".equals(normalizeToken(schema.previousToken)) && next.isEmpty();
+        return isOneOf(word, "try", "tries", "tried", "trying") && "something".equals(next)
+                && "new".equals(normalizeToken(markerToken(tokens, index + 2)));
     }
     private static boolean preferredGroundedCandidate(SchemaIntention candidate, SchemaIntention selected) {
         if (selected == null) return true;
@@ -730,7 +753,8 @@ public final class MeaningMinerBridge {
     }
     private static String parseAdmissionMode(String value, String source) {
         String mode = value.trim().toLowerCase(Locale.ROOT);
-        if ("all".equals(mode) || "ideational-main".equals(mode) || "ideational-grounded".equals(mode)) return mode;
+        if ("all".equals(mode) || "ideational-main".equals(mode) || "ideational-grounded".equals(mode)
+                || "ideational-sparse".equals(mode)) return mode;
         throw new IllegalArgumentException("Unsupported MeaningMiner gesture admission mode from " + source + ": " + value);
     }
     private static void auditAdmission(String actor, String eventId, Admission admission) throws Exception {

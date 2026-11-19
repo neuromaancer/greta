@@ -182,6 +182,9 @@ extraction for audit and all selected bimanual outputs afterward. Missing or
 unresolvable main anchors fall back explicitly to all extracted intentions.
 For matched transcript comparisons, `ideational-grounded` may admit a
 word-supported candidate from the same unit or leave the unit speech-only.
+The opt-in `ideational-sparse` policy also permits speech-only units when
+a generic OBJECT is anchored to a formulaic phrase. Apply the same English
+context rules to every actor and keep the actor's existing expressivity profile.
 Use the extractor's utterance-wide source token indexes. Keep raw candidates,
 admitted anchors and realized gestures distinguishable in the evidence.
 This is semantic admission, not a confidence threshold. Root/legs, gaze, lips,
