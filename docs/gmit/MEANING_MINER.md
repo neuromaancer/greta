@@ -62,7 +62,12 @@ and repeat with `--apply`. The deployment receipt covers the loaded JAR and
 supports the usual `--rollback <receipt.json>` command.
 
 In the November 19 matched seven-turn Pure replay, both policies saw the same
-29 extracted candidates and used the same seven WAV files byte for byte.
+29 extracted candidates. All seven scheduled utterance WAVs were byte-identical.
+The completed runs were `replay-20261119-105008-467` (grounded) and
+`replay-20261119-105209-295` (main). An earlier main run,
+`replay-20261119-103540-826`, stopped at the turn-four hand-return clearance
+check and was excluded. Both completed runs used the same corrected return path
+and clearance thresholds.
 With corrected timing, `ideational-main` realized ten gestures (eight OBJECT,
 one UP and one ENABLEMENT). The grounded English policy realized seven
 (five OBJECT and two ENABLEMENT). It replaced one phrasal-verb UP with an
