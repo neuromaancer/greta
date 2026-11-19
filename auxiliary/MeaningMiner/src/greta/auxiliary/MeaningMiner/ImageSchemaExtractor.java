@@ -62,8 +62,11 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -102,6 +105,7 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
     private ArrayList<IntentionPerformer> intentionsPerformers = new ArrayList<>();
     private DictionnarySynsetImageSchema dictSynsetToImageSchema = new DictionnarySynsetImageSchema();
     private DictionnaryImageSchemaGesture dictImageSchemaToGesture = new DictionnaryImageSchemaGesture();
+    private final Map<String, Integer> schemaTokenIndexes = new LinkedHashMap<>();
     private String WORDNETDICTPATH = "./Common/Data/wordnet30/dict";
     private String STANFORDPARSER = "./Common/Data/stanfordparser/englishPCFG.ser.gz";
     private String OPENNLPCHUNKER = "./Common/Data/opennlp/en-chunker.bin";
@@ -287,9 +291,9 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
         String tagFreeInput = inputXML.toString().replaceAll("<[^>]+>", "");
         tagFreeInput = tagFreeInput.replaceAll("(<!--)*(-->)", "");
         List<XMLTree> imageSchemasGenerated = new ArrayList<>();
+        schemaTokenIndexes.clear();
 
         int countTimeMarkers = 0;
-        int countSentenceMarkers = 0;
         int countIdeationalUnit = 0;
         int countImageSchema = 0;
         
@@ -315,6 +319,7 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
 
         //split by sentences, for each sentences:
         for (List<HasWord> sentence : new DocumentPreprocessor(sr)) {
+            SentenceMarkerOffsets markerOffsets = new SentenceMarkerOffsets(countTimeMarkers, sentence.size());
             
             String[] token_array = new String[sentence.size()];
             String[] lemma_array = new String[sentence.size()];
@@ -375,9 +380,9 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
             XMLTree ideationalUnit = fmlRoot.createChild("ideationalunit");
             ideationalUnit.setAttribute("id", "id_" + countIdeationalUnit++);
             ideationalUnit.setAttribute("importance", "1.0");
-            ideationalUnit.setAttribute("start", "s1:tm" + countTimeMarkers + "-0.2");
-            System.out.println("[COUNT TIME MARKERS]:"+countTimeMarkers+"   "+sentence.size());
-            ideationalUnit.setAttribute("end", "s1:tm" + (countTimeMarkers + sentence.size() - 1) + "-0.2");
+            ideationalUnit.setAttribute("start", "s1:tm" + markerOffsets.sentenceStart() + "-0.2");
+            System.out.println("[COUNT TIME MARKERS]:"+markerOffsets.sentenceStart()+"   "+sentence.size());
+            ideationalUnit.setAttribute("end", "s1:tm" + markerOffsets.sentenceEndInclusive() + "-0.2");
             String[] listToken = new String[sentence.size()];
             String[] listPos = new String[sentence.size()];
             
@@ -420,7 +425,7 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
             String chunktag[] = chunker.chunk(listToken, listPos);
             XMLTree previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers);
 
-            System.out.println("countSentenceMarkers: " + countSentenceMarkers);
+            System.out.println("countTimeMarkers: " + countTimeMarkers);
             System.out.println("Sentence:" + sentence.toString());
                         
             //XMLTree imageSchema = fmlRoot.createChild("imageschema");
@@ -603,7 +608,7 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                                 imageSchemas.addAll(imscSet);
 
                                 System.out.println("Synset: " + synset.toString() + " " + imscSet.toString());
-                                System.out.println("countSentenceMarkers: " + countSentenceMarkers);
+                                System.out.println("countTimeMarkers: " + countTimeMarkers);
                                 
                             }
                             
@@ -647,19 +652,22 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                         cl_index = cl.index();
 
                     }
+                    int tokenMarker = charactermanager.getLanguage() == "FR"
+                            ? markerOffsets.markerForFrenchTokenIndex(cl_index)
+                            : markerOffsets.markerForEnglishDependencyIndex(cl_index);
                     
                     if (chunk_tag_i.startsWith("B")) {
 
                         if (previousImageSchema != null) {
                             if (previousImageSchema.getAttribute("type") == "") {
                                 fmlRoot.removeChild(previousImageSchema);
-                                previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
+                                previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
 
                             } else {
                                 if (!imageSchemas.isEmpty()) {
-                                    previousImageSchema.setAttribute("end", "s1:tm" + (countTimeMarkers + cl_index) + "-0.2");
+                                    previousImageSchema.setAttribute("end", "s1:tm" + tokenMarker + "-0.2");
                                     imageSchemasGenerated.add(previousImageSchema);
-                                    previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
+                                    previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
 
                                 } else {
                                     //This is used so the Image Schema coming from a previous chunk can span unto the next chunk until there is a new Image Schema.
@@ -667,14 +675,13 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                                 }
                             }
                         } else {
-                            previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
+                            previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
 
                         }
                         //If an Image Schema is identified for this word, I insert it
                         if (!imageSchemas.isEmpty()) {
                             String imageRef = imageSchemas.iterator().next().toLowerCase();
-                            previousImageSchema.setAttribute("type", imageRef);
-                            previousImageSchema.setAttribute("POSroot", pos.toString());
+                            assignImageSchemaType(previousImageSchema, imageRef, pos.toString(), tokenMarker);
                         }
 
                     }
@@ -682,34 +689,34 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                     //has been created for the whole chunk during the B case, OR create a new one in case of multiple instance of a noun in a NP or verb in a VP
                     if (chunk_tag_i.startsWith("I")) {
                         if (previousImageSchema == null) {
-                            previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
+                            previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
                             //Check if the Image Schema was coming from a previous chunk
                         } else if (previousImageSchema.getAttribute("previous") == "true" && !imageSchemas.isEmpty()) {
 
-                            previousImageSchema.setAttribute("end", "s1:tm" + (countSentenceMarkers + cl_index) + "-0.2");
+                            previousImageSchema.setAttribute("end", "s1:tm" + tokenMarker + "-0.2");
                             imageSchemasGenerated.add(previousImageSchema);
-                            previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
+                            previousImageSchema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
 
                         }
                         if (!imageSchemas.isEmpty()) {
                             switch (chunktag[i]) {
                                 case "I-NP": {
                                     if (previousImageSchema.getAttribute("POSroot") == "") {
-                                        setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                        setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
                                     } else {
                                         if (previousImageSchema.getAttribute("POSroot").equals(POS.NOUN.toString())) {
-                                            setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                            setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
 
                                         }
-                                        if (pos.equals(POS.ADJECTIVE) || isWithinPitchAccent(listPitchAccent, cl_index) || pos.equals(POS.NOUN) && !previousImageSchema.getAttribute("POSroot").equals(POS.ADJECTIVE.toString())) {
+                                        if (pos.equals(POS.ADJECTIVE) || isWithinPitchAccent(listPitchAccent, tokenMarker) || pos.equals(POS.NOUN) && !previousImageSchema.getAttribute("POSroot").equals(POS.ADJECTIVE.toString())) {
                                             if (previousImageSchema.getAttribute("type") == "") {
                                                 fmlRoot.removeChild(previousImageSchema);
                                             } else {
-                                                previousImageSchema.setAttribute("end", "s1:tm" + (countSentenceMarkers + cl_index) + "-0.2");
+                                                previousImageSchema.setAttribute("end", "s1:tm" + tokenMarker + "-0.2");
                                                 imageSchemasGenerated.add(previousImageSchema);
                                             }
-                                            XMLTree imageschema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
-                                            setImageSchemaType(imageschema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                            XMLTree imageschema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
+                                            setImageSchemaType(imageschema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
                                             previousImageSchema = imageschema;
                                         }
                                     }
@@ -718,20 +725,20 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
 
                                 case "I-VP": {
                                     if (previousImageSchema.getAttribute("POSroot") == "") {
-                                        setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                        setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
                                     } else {
                                         if (previousImageSchema.getAttribute("POSroot").equals(POS.VERB.toString())) {
-                                            setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                            setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
                                         }
-                                        if (pos.equals(POS.ADVERB) || isWithinPitchAccent(listPitchAccent, cl_index) || pos.equals(POS.VERB) && !previousImageSchema.getAttribute("POSroot").equals(POS.ADVERB.toString())) {
+                                        if (pos.equals(POS.ADVERB) || isWithinPitchAccent(listPitchAccent, tokenMarker) || pos.equals(POS.VERB) && !previousImageSchema.getAttribute("POSroot").equals(POS.ADVERB.toString())) {
                                             if (previousImageSchema.getAttribute("type") == "") {
                                                 fmlRoot.removeChild(previousImageSchema);
                                             } else {
-                                                previousImageSchema.setAttribute("end", "s1:tm" + (countSentenceMarkers + cl_index) + "-0.2");
+                                                previousImageSchema.setAttribute("end", "s1:tm" + tokenMarker + "-0.2");
                                                 imageSchemasGenerated.add(previousImageSchema);
                                             }
-                                            XMLTree imageschema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
-                                            setImageSchemaType(imageschema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                            XMLTree imageschema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
+                                            setImageSchemaType(imageschema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
                                             previousImageSchema = imageschema;
                                         }
                                     }
@@ -740,17 +747,17 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
 
                                 default: { //I-PRT, I-INTJ, I-SBAR, I-ADJP, I-ADVP, I-PP
                                     if (previousImageSchema.getAttribute("POSroot") == "") {
-                                        setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                        setImageSchemaType(previousImageSchema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
 
                                     } else {
                                         if (previousImageSchema.getAttribute("type") == "") {
                                             fmlRoot.removeChild(previousImageSchema);
                                         } else {
-                                            previousImageSchema.setAttribute("end", "s1:tm" + (countSentenceMarkers + cl_index) + "-0.2");
+                                            previousImageSchema.setAttribute("end", "s1:tm" + tokenMarker + "-0.2");
                                             imageSchemasGenerated.add(previousImageSchema);
                                         }
-                                        XMLTree imageschema = createXMLImageSchema(fmlRoot, countImageSchema++, countTimeMarkers + cl_index);
-                                        setImageSchemaType(imageschema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index);
+                                        XMLTree imageschema = createXMLImageSchema(fmlRoot, countImageSchema++, tokenMarker);
+                                        setImageSchemaType(imageschema, imageSchemas.iterator().next().toLowerCase(), pos.toString(), ideationalUnit, tdl, cl_index, tokenMarker);
                                         previousImageSchema = imageschema;
                                     }
                                     break;
@@ -763,7 +770,7 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                             if (previousImageSchema.getAttribute("type") == "") {
                                 fmlRoot.removeChild(previousImageSchema);
                             } else {
-                                previousImageSchema.setAttribute("end", "s1:tm" + (countSentenceMarkers + cl_index) + "-0.2");
+                                previousImageSchema.setAttribute("end", "s1:tm" + tokenMarker + "-0.2");
                                 imageSchemasGenerated.add(previousImageSchema);
                             }
 
@@ -778,14 +785,13 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
 
             }
 
-            //countSentenceMarkers += sentence.size();
-            countSentenceMarkers++;
+            int sentenceEndTimeMarker = markerOffsets.nextSentenceStart();
 
             if (previousImageSchema != null) {
                 if (previousImageSchema.getAttribute("type").equals("")) {
                     fmlRoot.removeChild(previousImageSchema);
                 } else {
-                    previousImageSchema.setAttribute("end", "s1:tm" + (countSentenceMarkers + 1) + "-0.2");
+                    previousImageSchema.setAttribute("end", "s1:tm" + sentenceEndTimeMarker + "-0.2");
                     imageSchemasGenerated.add(previousImageSchema);
                 }
 
@@ -801,6 +807,8 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                 }
             }
 
+            countTimeMarkers = sentenceEndTimeMarker;
+
         }
 
         System.out.println("CHECK TEXT");
@@ -815,6 +823,14 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
         return intentions;
     }
 
+    /**
+     * Returns the originating global zero-based speech-marker index for every
+     * image schema assigned during the most recent extraction.
+     */
+    public Map<String, Integer> getSchemaTokenIndexes() {
+        return Collections.unmodifiableMap(new LinkedHashMap<String, Integer>(schemaTokenIndexes));
+    }
+
     //Insert a new xml imageschema in the XML tree. This object will be completed later or even deleted if no Image Schema could be put there.
     private XMLTree createXMLImageSchema(XMLTree fmlRoot, int countImageSchema, int countTimeMarker) {
         XMLTree imageschema = fmlRoot.createChild("imageschema");
@@ -826,11 +842,10 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
     }
 
     //Set the Image Schema to this xml imageschema. It checks if this was the root of the sentence to decide if it should be the main of the current ideational unit.
-    private void setImageSchemaType(XMLTree imageschema, String imageRef, String pos, XMLTree ideationalUnit, List<TypedDependency> tdl, Integer indexWord) {
+    private void setImageSchemaType(XMLTree imageschema, String imageRef, String pos, XMLTree ideationalUnit, List<TypedDependency> tdl, Integer indexWord, int tokenMarker) {
 
-        imageschema.setAttribute("type", imageRef);
+        assignImageSchemaType(imageschema, imageRef, pos, tokenMarker);
         imageschema.setAttribute("indexword", indexWord.toString());
-        imageschema.setAttribute("POSroot", pos);
 
         for (TypedDependency td : tdl) {
             if (td.dep().index() == indexWord) {
@@ -840,6 +855,12 @@ public class ImageSchemaExtractor implements MeaningMinerModule, IntentionEmitte
                 break;
             }
         }
+    }
+
+    private void assignImageSchemaType(XMLTree imageschema, String imageRef, String pos, int tokenMarker) {
+        imageschema.setAttribute("type", imageRef);
+        imageschema.setAttribute("POSroot", pos);
+        schemaTokenIndexes.put(imageschema.getAttribute("id"), tokenMarker);
     }
 
     //Return the Image Schemas that can be found for this Synset (meaning).

@@ -1,5 +1,7 @@
 import java.util.Arrays;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -31,7 +33,7 @@ public final class MeaningMinerBridgeTest {
         expectIo(() -> MeaningMinerBridge.validateEmissionKinds(Arrays.asList("SpeechSignal"), 2));
         semanticAdmission();
         timeoutRestoresDiagnostic();
-        System.out.println("PASS xml_escape event_id text_boundary image_schema_filter semantic_admission");
+        System.out.println("PASS xml_escape event_id text_boundary image_schema_filter semantic_admission grounded_admission");
     }
     private static void semanticAdmission() throws Exception {
         String global = "gmit.meaningminer.gesture.admission";
@@ -56,6 +58,41 @@ public final class MeaningMinerBridgeTest {
             System.setProperty(actor, "all");
             require(MeaningMinerBridge.admittedIntentions("patient-a", values).equals(values), "actor property overrides global policy");
             System.clearProperty(actor);
+            System.setProperty(global, "ideational-grounded");
+            IdeationalUnit groundedUnit = new IdeationalUnit("u3", "im-generic");
+            GroundedSchema generic = new GroundedSchema("imageschema", "object", "im-generic", "tm0");
+            GroundedSchema enabled = new GroundedSchema("imageschema", "enablement", "im-enabled", "tm1");
+            List<Object> grounded = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, groundedUnit, generic, enabled), Arrays.asList("say", "can"), indexes("im-generic", 0, "im-enabled", 1));
+            require(!grounded.contains(generic) && grounded.contains(enabled), "replace generic object only with a token-grounded specific schema");
+            require("im-enabled".equals(((IdeationalUnit) grounded.get(1)).getMainIntentionId()), "remap copied ideational unit to admitted schema");
+            require("im-generic".equals(groundedUnit.getMainIntentionId()), "retain raw ideational unit for audit");
+            require(MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, groundedUnit, generic, enabled), Arrays.asList("say", "can")).contains(generic),
+                    "missing extractor source evidence preserves the original main schema");
+            List<Object> suppressed = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, new IdeationalUnit("u4", "im-say"), new GroundedSchema("imageschema", "object", "im-say", "tm0")), Arrays.asList("say"), indexes("im-say", 0));
+            require(suppressed.size() == 1 && suppressed.contains(speech), "suppress ungrounded generic object and its orphaned unit without inventing gesture");
+            GroundedSchema outsideUnit = new GroundedSchema("imageschema", "enablement", "im-outside", "tm2");
+            List<Object> noCrossUnitPromotion = MeaningMinerBridge.admittedIntentions("patient-a",
+                    Arrays.<Object>asList(speech, new IdeationalUnit("u4b", "im-say-2"), new GroundedSchema("imageschema", "object", "im-say-2", "tm0"), outsideUnit),
+                    Arrays.asList("say", "then", "can"), indexes("im-say-2", 0, "im-outside", 2));
+            require(noCrossUnitPromotion.size() == 1 && noCrossUnitPromotion.contains(speech), "do not promote a schema whose exact source token is outside the unit");
+
+            IdeationalUnit endedUp = new IdeationalUnit("u5", new Marker("tm0"), new Marker("tm2"));
+            endedUp.setMainIntentionId("im-up");
+            GroundedSchema idiomaticUp = new GroundedSchema("imageschema", "up", "im-up", "tm1");
+            GroundedSchema ordering = new GroundedSchema("imageschema", "enablement", "im-ordering", "tm2");
+            List<Object> phrase = MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, endedUp, idiomaticUp, ordering),
+                    Arrays.asList("ended", "up", "ordering"), indexes("im-up", 1, "im-ordering", 2));
+            require(!phrase.contains(idiomaticUp) && phrase.contains(ordering), "remap idiomatic ended up to same-unit deliberative action");
+            require("im-ordering".equals(((IdeationalUnit) phrase.get(1)).getMainIntentionId()), "retain selected source-grounded action as the unit main");
+            IdeationalUnit literalUp = new IdeationalUnit("u6", new Marker("tm0"), new Marker("tm2"));
+            literalUp.setMainIntentionId("im-literal-up");
+            GroundedSchema literal = new GroundedSchema("imageschema", "up", "im-literal-up", "tm1");
+            GroundedSchema otherAction = new GroundedSchema("imageschema", "enablement", "im-other-action", "tm2");
+            List<Object> literalPhrase = MeaningMinerBridge.admittedIntentions("patient-a", Arrays.<Object>asList(speech, literalUp, literal, otherAction),
+                    Arrays.asList("look", "up", "ordering"), indexes("im-literal-up", 1, "im-other-action", 2));
+            require(literalPhrase.contains(literal) && !literalPhrase.contains(otherAction), "preserve literal directional up");
             List<Object> invalid = Arrays.<Object>asList(speech, new IdeationalUnit("u2", "missing"), main, secondary);
             require(MeaningMinerBridge.admittedIntentions("patient-a", invalid).equals(invalid), "invalid main anchor preserves complete raw turn");
             System.setProperty(global, "unsupported");
@@ -66,6 +103,13 @@ public final class MeaningMinerBridgeTest {
     }
     private static void restoreProperty(String name, String value) {
         if (value == null) System.clearProperty(name); else System.setProperty(name, value);
+    }
+    private static Map<String, Integer> indexes(String first, int firstIndex, String second, int secondIndex) {
+        Map<String, Integer> values = new LinkedHashMap<String, Integer>();
+        values.put(first, Integer.valueOf(firstIndex)); values.put(second, Integer.valueOf(secondIndex)); return values;
+    }
+    private static Map<String, Integer> indexes(String id, int index) {
+        return indexes(id, index, "unused", 0);
     }
     private static void timeoutRestoresDiagnostic() throws Exception {
         File directory = Files.createTempDirectory("meaning-miner-bridge-test").toFile();
@@ -94,7 +138,7 @@ public final class MeaningMinerBridgeTest {
     private static void require(boolean value, String detail) {
         if (!value) throw new AssertionError(detail);
     }
-    public static final class Intention {
+    public static class Intention {
         private final String name, type, id;
         public Intention(String name, String type) { this(name, type, name + "-id"); }
         public Intention(String name, String type, String id) { this.name = name; this.type = type; this.id = id; }
@@ -103,12 +147,34 @@ public final class MeaningMinerBridgeTest {
         public String getId() { return id; }
     }
     public static final class IdeationalUnit {
-        private final String id, main;
-        public IdeationalUnit(String id, String main) { this.id = id; this.main = main; }
+        private final String id;
+        private String main;
+        private final Marker start, end;
+        public IdeationalUnit(String id, String main) { this(id, main, new Marker("tm0"), new Marker("tm1")); }
+        public IdeationalUnit(String id, Object start, Object end) { this(id, "", (Marker) start, (Marker) end); }
+        private IdeationalUnit(String id, String main, Marker start, Marker end) { this.id = id; this.main = main; this.start = start; this.end = end; }
         public String getName() { return "ideationalunit"; }
         public String getType() { return ""; }
         public String getId() { return id; }
         public String getMainIntentionId() { return main; }
+        public void setMainIntentionId(String value) { main = value; }
+        public Marker getStart() { return start; }
+        public Marker getEnd() { return end; }
+    }
+    public static final class GroundedSchema extends Intention {
+        private final Marker start;
+        public GroundedSchema(String name, String type, String id, String marker) { super(name, type, id); this.start = new Marker(marker); }
+        public Marker getStart() { return start; }
+    }
+    public static final class Marker {
+        private final String target;
+        public Marker(String target) { this.target = target; }
+        public List<Reference> getReferences() { return Arrays.asList(new Reference(target)); }
+    }
+    public static final class Reference {
+        private final String target;
+        public Reference(String target) { this.target = target; }
+        public String getTargetName() { return target; }
     }
     public static final class FakeChild {
         public static void main(String[] args) throws Exception {

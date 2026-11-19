@@ -4,7 +4,8 @@ param(
     [switch]$MeaningMiner, [switch]$DisableHandSafety,
     [switch]$VaryRestPoses, [int]$RestSeed = 711,
     [switch]$Muted, [switch]$RecordVideo, [switch]$FullHD,
-    [string]$AzurePython,
+    [string]$AzurePython, [string]$AzureReplayFrom,
+    [ValidateSet('all','ideational-main','ideational-grounded')][string]$GestureAdmission,
     [string]$ModiffDirectory,
     [ValidateRange(0,15)][int]$StartDelaySeconds = 0,
     [ValidateRange(1,5)][int]$TurnGapSeconds = 1,
@@ -20,6 +21,13 @@ if ($RecordVideo -and ((-not ($GroupMI -or $Replay)) -or $Preview)) {
     throw '-RecordVideo requires a GroupMI/Replay run with speech.'
 }
 if ($FullHD -and -not $RecordVideo) { throw '-FullHD requires -RecordVideo.' }
+if ($GestureAdmission -and -not $MeaningMiner) { throw '-GestureAdmission requires -MeaningMiner.' }
+if ($AzureReplayFrom) {
+    if ($AzurePython -or -not ($GroupMI -or $Replay) -or $Preview -or
+        -not ([IO.Path]::IsPathRooted($AzureReplayFrom) -and (Test-Path -LiteralPath $AzureReplayFrom -PathType Container))) {
+        throw '-AzureReplayFrom requires a spoken scenario and an absolute recording directory. Choose one Jenny source.'
+    }
+}
 if ($Muted -and -not $automatic) { throw '-Muted requires an automatic Smoke/GroupMI/Replay run.' }
 if ($AzurePython) {
     if ((-not ($GroupMI -or $Replay)) -or $Preview) { throw '-AzurePython requires a GroupMI/Replay run with speech.' }
@@ -138,6 +146,7 @@ try {
         if ($DisableListenerNods) { $arguments = @('-Dgmit.gaze.backchannel=false') + $arguments }
         if ($DisableTabletopArms) { $arguments = @('-Dgmit.pose.arms=false') + $arguments }
         if ($MeaningMiner) { $arguments = @('-Dgmit.meaningminer.enabled=true') + $arguments }
+        if ($GestureAdmission) { $arguments = @(('-Dgmit.meaningminer.gesture.admission=' + $GestureAdmission)) + $arguments }
         if ($DisableHandSafety) { $arguments = @('-Dgmit.meaningminer.handSafety=false') + $arguments }
         if ($Muted) { $arguments = @('-Dgmit.audio.muted=true') + $arguments }
         if ($RecordVideo) { $arguments = @('-Dgmit.video.enabled=true') + $arguments }
@@ -147,6 +156,7 @@ try {
             $arguments = @('-Dgmit.video.fullHD=true', '-Xms1g', '-Xmx4g', '-XX:+UseG1GC', '-XX:G1HeapRegionSize=16m') + $arguments
         }
         if ($AzurePython) { $arguments = @(('"-Dgmit.azure.python=' + $AzurePython + '"')) + $arguments }
+        if ($AzureReplayFrom) { $arguments = @(('"-Dgmit.azure.replayFrom=' + $AzureReplayFrom + '"')) + $arguments }
         if ($ModiffDirectory) { $arguments = @(('"-Dgmit.modiff.dir=' + $ModiffDirectory + '"')) + $arguments }
         if ($GroupMI -or $Replay) { $arguments += ('"' + $scenario + '"') }
     } else { $arguments = @('-jar', 'Modular.jar', ('"' + $config + '"')) }

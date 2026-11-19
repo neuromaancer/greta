@@ -108,7 +108,7 @@ public final class MeaningMinerBridge {
                 String expectedHash = textHash(text), actualHash = textHash(actualSpeech);
                 if (!expectedHash.equals(actualHash)) throw new IOException("MeaningMiner changed speech text for " + key + " expected_sha256=" + expectedHash + " actual_sha256=" + actualHash);
                 auditIntentions(actor, eventId, intentions, expectedHash);
-                Admission admission = admitIntentions(actor, intentions);
+                Admission admission = admitIntentions(actor, intentions, markerTokens(markup), schemaTokenIndexes(state.extractor));
                 auditAdmission(actor, eventId, admission);
                 List<String> types = imageSchemaTypes(intentions);
                 PREPARED.put(key, new PreparedTurn(actor, eventId, text, admission, types, expectedHash));
@@ -480,15 +480,23 @@ public final class MeaningMinerBridge {
      * input list.  The extracted list itself is retained unchanged for audit.
      */
     static List<Object> admittedIntentions(String actor, List<Object> values) throws Exception {
-        return admitIntentions(actor, values).admittedIntentions;
+        return admitIntentions(actor, values, Collections.<String>emptyList(), Collections.<String, Integer>emptyMap()).admittedIntentions;
     }
-    private static Admission admitIntentions(String actor, List<Object> values) throws Exception {
+    static List<Object> admittedIntentions(String actor, List<Object> values, List<String> markerTokens) throws Exception {
+        return admitIntentions(actor, values, markerTokens, Collections.<String, Integer>emptyMap()).admittedIntentions;
+    }
+    static List<Object> admittedIntentions(String actor, List<Object> values, List<String> markerTokens, Map<String, Integer> schemaTokenIndexes) throws Exception {
+        return admitIntentions(actor, values, markerTokens, schemaTokenIndexes).admittedIntentions;
+    }
+    private static Admission admitIntentions(String actor, List<Object> values, List<String> markerTokens, Map<String, Integer> schemaTokenIndexes) throws Exception {
         String mode = admissionMode(actor);
         List<Object> raw = Collections.unmodifiableList(new ArrayList<Object>(values));
-        if ("all".equals(mode)) return new Admission(mode, raw, new ArrayList<Object>(raw), Collections.<String>emptyList(), Collections.<String>emptyList(), "disabled");
+        if ("all".equals(mode)) return new Admission(mode, raw, new ArrayList<Object>(raw), Collections.<String>emptyList(), Collections.<String>emptyList(), Collections.<String>emptyList(), Collections.<String>emptyList(), Collections.<String>emptyList(), "disabled");
 
         Set<String> schemaIds = new LinkedHashSet<String>();
         Set<String> anchors = new LinkedHashSet<String>();
+        List<IdeationalUnitGroup> units = new ArrayList<IdeationalUnitGroup>();
+        Map<String, SchemaIntention> schemas = new LinkedHashMap<String, SchemaIntention>();
         boolean hasIdeationalUnit = false;
         boolean invalid = false;
         for (Object value : raw) {
@@ -496,29 +504,214 @@ public final class MeaningMinerBridge {
             if ("imageschema".equalsIgnoreCase(name)) {
                 String id = requiredStringMethod(value, "getId");
                 if (id.isEmpty()) invalid = true;
-                else schemaIds.add(id);
+                else {
+                    schemaIds.add(id);
+                    Integer sourceIndex = schemaTokenIndexes.get(id);
+                    int marker = sourceIndex == null ? -1 : sourceIndex.intValue();
+                    SchemaIntention schema = new SchemaIntention(value, id, requiredStringMethod(value, "getType"),
+                            marker, markerToken(markerTokens, sourceIndex), markerToken(markerTokens, Integer.valueOf(marker - 1)));
+                    schemas.put(id, schema);
+                }
             } else if ("ideationalunit".equalsIgnoreCase(name)) {
                 hasIdeationalUnit = true;
                 String main;
                 try { main = requiredStringMethod(value, "getMainIntentionId"); }
                 catch (NoSuchMethodException error) { invalid = true; continue; }
                 if (main.isEmpty()) invalid = true;
-                else anchors.add(main);
+                else {
+                    anchors.add(main);
+                    units.add(new IdeationalUnitGroup(value, main, markerIndex(value, "getStart"), markerIndex(value, "getEnd")));
+                }
             }
         }
         for (String anchor : anchors) if (!schemaIds.contains(anchor)) invalid = true;
         if (!schemaIds.isEmpty() && (!hasIdeationalUnit || anchors.isEmpty())) invalid = true;
-        if (invalid) return new Admission(mode, raw, new ArrayList<Object>(raw), new ArrayList<String>(anchors), new ArrayList<String>(schemaIds), "invalid-main-anchor");
+        if (invalid) return new Admission(mode, raw, new ArrayList<Object>(raw), new ArrayList<String>(anchors), new ArrayList<String>(schemaIds), schemaSourceAudit(schemas), Collections.<String>emptyList(), Collections.<String>emptyList(), "invalid-main-anchor");
+
+        for (IdeationalUnitGroup unit : units) {
+            SchemaIntention main = schemas.get(unit.mainId);
+            if (main != null) unit.schemas.add(main);
+            for (SchemaIntention schema : schemas.values()) {
+                if (schema == main || !unit.contains(schema.sourceIndex)) continue;
+                unit.schemas.add(schema);
+            }
+        }
+
+        Map<Object, String> selectedMainIds = new LinkedHashMap<Object, String>();
+        List<String> remaps = new ArrayList<String>();
+        List<String> suppressed = new ArrayList<String>();
+        Set<String> admittedSet = anchors;
+        String reason = "main-anchors";
+        if ("ideational-grounded".equals(mode)) {
+            for (IdeationalUnitGroup unit : units) {
+                SchemaIntention selected = selectGroundedSchema(unit, schemas.get(unit.mainId));
+                if (selected != null) {
+                    selectedMainIds.put(unit.value, selected.id);
+                    if (!selected.id.equals(unit.mainId)) remaps.add(unit.mainId + "->" + selected.id + "@" + sourceAudit(selected));
+                } else {
+                    SchemaIntention main = schemas.get(unit.mainId);
+                    if (main != null) suppressed.add(unit.mainId + "@" + sourceAudit(main));
+                }
+            }
+            admittedSet = new LinkedHashSet<String>(selectedMainIds.values());
+            reason = schemaTokenIndexes.isEmpty() ? "source-map-unavailable-main-anchors" : "grounded-main-or-specific";
+        }
 
         List<Object> admitted = new ArrayList<Object>();
         List<String> admittedIds = new ArrayList<String>();
         for (Object value : raw) {
             String name = requiredStringMethod(value, "getName");
+            if ("ideationalunit".equalsIgnoreCase(name)) {
+                if ("ideational-grounded".equals(mode)) {
+                    if (selectedMainIds.containsKey(value)) admitted.add(remappedIdeationalUnit(value, selectedMainIds.get(value)));
+                    // A grounded policy may suppress an ungrounded generic main.  Its
+                    // unit must leave with it: Planner cannot receive an orphan anchor.
+                } else admitted.add(value);
+                continue;
+            }
             if (!"imageschema".equalsIgnoreCase(name)) { admitted.add(value); continue; }
             String id = requiredStringMethod(value, "getId");
-            if (anchors.contains(id)) { admitted.add(value); admittedIds.add(id); }
+            if (admittedSet.contains(id)) { admitted.add(value); admittedIds.add(id); }
         }
-        return new Admission(mode, raw, admitted, new ArrayList<String>(anchors), admittedIds, "main-anchors");
+        return new Admission(mode, raw, admitted, new ArrayList<String>(anchors), admittedIds, schemaSourceAudit(schemas), remaps, suppressed, reason);
+    }
+
+    /**
+     * A comparison policy for natural dialogue. It maintains the one-schema
+     * budget per ideational unit, retaining the extractor main anchor whenever
+     * it is grounded. A generic OBJECT mapped from a communication verb is
+     * omitted unless a grounded, non-directional schema in the same unit
+     * provides a more specific alternative. The only direction-like phrase
+     * reinterpreted here is "ended up": its UP schema is idiomatic, and only a
+     * same-unit, source-grounded deliberative action can replace it.
+     */
+    private static SchemaIntention selectGroundedSchema(IdeationalUnitGroup unit, SchemaIntention main) {
+        if (main == null) return null;
+        SchemaIntention selected = null;
+        int best = 0;
+        for (SchemaIntention candidate : unit.schemas) {
+            int specificity = groundedSpecificity(candidate.type, candidate.token);
+            if (specificity > best || (specificity == best && specificity > 0 && preferredGroundedCandidate(candidate, selected))) {
+                selected = candidate;
+                best = specificity;
+            }
+        }
+        if ("object".equals(normalizeSchemaType(main.type)) && genericObjectCue(main.token)) return selected;
+        if (idiomaticEndedUp(main.type, main.token, main.previousToken) && selected != null) return selected;
+        return main;
+    }
+
+    private static int groundedSpecificity(String type, String token) {
+        String schema = normalizeSchemaType(type), word = normalizeToken(token);
+        if ("enablement".equals(schema) && isOneOf(word, "can", "could", "may", "might", "will", "would", "should", "able", "ability", "try", "trying", "attempt", "attempting", "choose", "choosing", "option", "order", "ordering")) return 4;
+        if (("container".equals(schema) || "in".equals(schema) || "out".equals(schema) || "surface".equals(schema))
+                && isOneOf(word, "container", "box", "cup", "inside", "outside", "into", "out", "surface", "table")) return 4;
+        if (("growing".equals(schema) || "reducing".equals(schema) || "big".equals(schema) || "small".equals(schema))
+                && isOneOf(word, "more", "less", "reduce", "reducing", "cut", "cutting", "increase", "increasing", "grow", "growing", "bigger", "smaller")) return 3;
+        if ("whole".equals(schema) && isOneOf(word, "all", "both", "everyone", "whole", "group", "people", "together")) return 2;
+        if ("link".equals(schema) && isOneOf(word, "with", "together", "link", "linked", "connect", "connected", "relationship")) return 2;
+        if (("interval".equals(schema) || "near".equals(schema) || "far".equals(schema))
+                && isOneOf(word, "between", "range", "from", "through", "until", "across", "near", "far")) return 1;
+        return 0;
+    }
+
+    private static boolean genericObjectCue(String token) {
+        return isOneOf(normalizeToken(token), "say", "says", "said", "tell", "told", "ask", "asked", "express", "expressed");
+    }
+    private static boolean preferredGroundedCandidate(SchemaIntention candidate, SchemaIntention selected) {
+        if (selected == null) return true;
+        if (candidate.sourceIndex != selected.sourceIndex) return candidate.sourceIndex < selected.sourceIndex;
+        return candidate.id.compareTo(selected.id) < 0;
+    }
+    private static boolean idiomaticEndedUp(String type, String token, String previousToken) {
+        return "up".equals(normalizeSchemaType(type)) && "up".equals(normalizeToken(token))
+                && isOneOf(normalizeToken(previousToken), "end", "ends", "ended", "ending");
+    }
+
+    private static boolean isOneOf(String value, String... candidates) {
+        for (String candidate : candidates) if (candidate.equals(value)) return true;
+        return false;
+    }
+
+    private static String normalizeSchemaType(String value) { return value == null ? "" : value.trim().toLowerCase(Locale.ROOT); }
+    private static String normalizeToken(String value) { return value == null ? "" : value.replaceAll("[^\\p{L}\\p{N}]", "").toLowerCase(Locale.ROOT); }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Integer> schemaTokenIndexes(Object source) throws Exception {
+        try {
+            Object raw = source.getClass().getMethod("getSchemaTokenIndexes").invoke(source);
+            if (!(raw instanceof Map<?, ?>)) throw new IOException("MeaningMiner schema-token index snapshot is not a map");
+            Map<String, Integer> indexes = new LinkedHashMap<String, Integer>();
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) raw).entrySet()) {
+                if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof Number))
+                    throw new IOException("MeaningMiner schema-token index snapshot has an invalid entry");
+                int index = ((Number) entry.getValue()).intValue();
+                if (index < 0) throw new IOException("MeaningMiner schema-token index is negative");
+                indexes.put((String) entry.getKey(), Integer.valueOf(index));
+            }
+            return Collections.unmodifiableMap(indexes);
+        } catch (NoSuchMethodException unavailable) {
+            return Collections.emptyMap();
+        } catch (InvocationTargetException error) {
+            throw asException(unwrap(error));
+        }
+    }
+
+    private static int markerIndex(Object value, String method) {
+        try {
+            Object marker = value.getClass().getMethod(method).invoke(value);
+            @SuppressWarnings("unchecked") List<Object> references = (List<Object>) marker.getClass().getMethod("getReferences").invoke(marker);
+            for (Object reference : references) {
+                java.util.regex.Matcher match = java.util.regex.Pattern.compile("tm(\\d+)").matcher(String.valueOf(reference.getClass().getMethod("getTargetName").invoke(reference)));
+                if (match.find()) return Integer.parseInt(match.group(1));
+            }
+        } catch (Exception ignored) { }
+        return -1;
+    }
+
+    private static String markerToken(List<String> markerTokens, Integer sourceIndex) {
+        if (sourceIndex == null || sourceIndex.intValue() < 0 || sourceIndex.intValue() >= markerTokens.size()) return "";
+        return markerTokens.get(sourceIndex.intValue());
+    }
+
+    private static List<String> markerTokens(String markup) {
+        java.util.regex.Matcher markers = java.util.regex.Pattern.compile("<tm id=\\\"tm(\\d+)\\\"/>").matcher(markup);
+        List<String> tokens = new ArrayList<String>();
+        int previousEnd = -1, previousIndex = -1;
+        while (markers.find()) {
+            int current = Integer.parseInt(markers.group(1));
+            if (previousEnd >= 0 && current == previousIndex + 1) {
+                String token = markup.substring(previousEnd, markers.start()).replaceAll("<[^>]+>", "");
+                token = token.replace("&apos;", "'").replace("&quot;", "\"").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+                tokens.add(token.trim());
+            }
+            previousEnd = markers.end();
+            previousIndex = current;
+        }
+        return tokens;
+    }
+
+    private static Object remappedIdeationalUnit(Object value, String mainId) throws Exception {
+        if (mainId.equals(requiredStringMethod(value, "getMainIntentionId"))) return value;
+        Object start = value.getClass().getMethod("getStart").invoke(value);
+        Object end = value.getClass().getMethod("getEnd").invoke(value);
+        String id = requiredStringMethod(value, "getId");
+        for (Constructor<?> constructor : value.getClass().getConstructors()) {
+            Class<?>[] parameters = constructor.getParameterTypes();
+            if (parameters.length != 3 || parameters[0] != String.class || !parameters[1].isInstance(start) || !parameters[2].isInstance(end)) continue;
+            Object remapped = constructor.newInstance(id, start, end);
+            remapped.getClass().getMethod("setMainIntentionId", String.class).invoke(remapped, mainId);
+            return remapped;
+        }
+        throw new IOException("Cannot remap MeaningMiner ideational-unit anchor: " + id);
+    }
+    private static List<String> schemaSourceAudit(Map<String, SchemaIntention> schemas) {
+        List<String> values = new ArrayList<String>();
+        for (SchemaIntention schema : schemas.values()) values.add(schema.id + "@" + sourceAudit(schema));
+        return values;
+    }
+    private static String sourceAudit(SchemaIntention schema) {
+        return schema.sourceIndex < 0 ? "unknown" : "tm" + schema.sourceIndex + "=" + normalizeToken(schema.token);
     }
     private static String admissionMode(String actor) throws Exception {
         String actorValue = System.getProperty("gmit.meaningminer.gesture.admission." + actor);
@@ -537,7 +730,7 @@ public final class MeaningMinerBridge {
     }
     private static String parseAdmissionMode(String value, String source) {
         String mode = value.trim().toLowerCase(Locale.ROOT);
-        if ("all".equals(mode) || "ideational-main".equals(mode)) return mode;
+        if ("all".equals(mode) || "ideational-main".equals(mode) || "ideational-grounded".equals(mode)) return mode;
         throw new IllegalArgumentException("Unsupported MeaningMiner gesture admission mode from " + source + ": " + value);
     }
     private static void auditAdmission(String actor, String eventId, Admission admission) throws Exception {
@@ -549,6 +742,8 @@ public final class MeaningMinerBridge {
                 + " mode=" + admission.mode + " reason=" + admission.reason
                 + " raw_schema_ids=" + raw + " main_anchors=" + admission.mainAnchors
                 + " admitted_schema_ids=" + admission.admittedSchemaIds
+                + " source_tokens=" + admission.schemaSources + " remaps=" + admission.anchorRemaps
+                + " suppressed=" + admission.suppressedSchemas
                 + " raw_intentions=" + admission.rawIntentions.size() + " admitted_intentions=" + admission.admittedIntentions.size());
     }
     private static int countSpeech(List<Object> intentions) { int count = 0; for (Object value : intentions) if (value.getClass().getName().endsWith("PseudoIntentionSpeech")) count++; return count; }
@@ -806,14 +1001,40 @@ public final class MeaningMinerBridge {
     private static final class Admission {
         final String mode, reason;
         final List<Object> rawIntentions, admittedIntentions;
-        final List<String> mainAnchors, admittedSchemaIds;
+        final List<String> mainAnchors, admittedSchemaIds, schemaSources, anchorRemaps, suppressedSchemas;
         Admission(String mode, List<Object> rawIntentions, List<Object> admittedIntentions,
-                List<String> mainAnchors, List<String> admittedSchemaIds, String reason) {
+                List<String> mainAnchors, List<String> admittedSchemaIds, List<String> schemaSources,
+                List<String> anchorRemaps, List<String> suppressedSchemas, String reason) {
             this.mode = mode; this.reason = reason;
             this.rawIntentions = rawIntentions;
             this.admittedIntentions = admittedIntentions;
             this.mainAnchors = Collections.unmodifiableList(new ArrayList<String>(mainAnchors));
             this.admittedSchemaIds = Collections.unmodifiableList(new ArrayList<String>(admittedSchemaIds));
+            this.schemaSources = Collections.unmodifiableList(new ArrayList<String>(schemaSources));
+            this.anchorRemaps = Collections.unmodifiableList(new ArrayList<String>(anchorRemaps));
+            this.suppressedSchemas = Collections.unmodifiableList(new ArrayList<String>(suppressedSchemas));
+        }
+    }
+    private static final class IdeationalUnitGroup {
+        final Object value;
+        final String mainId;
+        final int startMarker, endMarker;
+        final List<SchemaIntention> schemas = new ArrayList<SchemaIntention>();
+        IdeationalUnitGroup(Object value, String mainId, int startMarker, int endMarker) {
+            this.value = value; this.mainId = mainId; this.startMarker = startMarker; this.endMarker = endMarker;
+        }
+        boolean contains(int sourceIndex) {
+            return sourceIndex >= 0 && startMarker >= 0 && endMarker >= startMarker
+                    && sourceIndex >= startMarker && sourceIndex <= endMarker;
+        }
+    }
+    private static final class SchemaIntention {
+        final Object value;
+        final String id, type, token, previousToken;
+        final int sourceIndex;
+        SchemaIntention(Object value, String id, String type, int sourceIndex, String token, String previousToken) {
+            this.value = value; this.id = id; this.type = type; this.sourceIndex = sourceIndex;
+            this.token = token; this.previousToken = previousToken;
         }
     }
     private static final class PreparedTurn {

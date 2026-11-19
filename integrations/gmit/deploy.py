@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from zipfile import ZipFile
 
 
 SOURCE = Path(__file__).resolve().parents[2]
@@ -27,6 +28,8 @@ def under(root, relative):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', required=True, type=Path)
+    parser.add_argument('--extractor-jar', type=Path, metavar='BUILT_JAR',
+                        help='Also deploy the rebuilt MeaningMiner module to the allowlisted runtime loader path')
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--apply', action='store_true')
     action.add_argument('--rollback', type=Path, metavar='RECEIPT')
@@ -34,13 +37,17 @@ def main():
     runtime = args.runtime.resolve()
     if runtime == SOURCE or not (runtime / 'bin/Modular.jar').is_file():
         raise ValueError('Runtime must be a separate existing Greta package')
-    files = json.loads(MANIFEST.read_text())['files']
+    manifest = json.loads(MANIFEST.read_text())
+    files = manifest['files']
+    extractor = manifest['extractor_jar']
     if args.rollback:
+        if args.extractor_jar:
+            parser.error('--rollback does not take a build artifact')
         receipt = json.loads(args.rollback.read_text())
         if Path(receipt['runtime']).resolve() != runtime:
             raise ValueError('Receipt belongs to another runtime')
         for row in receipt['files']:
-            if row['path'] not in files:
+            if row['path'] not in files and row['path'] != extractor:
                 raise ValueError('Receipt path not in the explicit deployment manifest')
             dst = under(runtime, row['path'])
             if digest(dst) != row['deployed_sha256']:
@@ -58,9 +65,19 @@ def main():
             assert digest(dst) == row['original_sha256']
         print('Restored deployment files; retained receipt, evidence, and backups.')
         return
+    sources = {relative: under(SOURCE, relative) for relative in files}
+    if args.extractor_jar:
+        with ZipFile(args.extractor_jar) as archive:
+            package = 'greta/auxiliary/MeaningMiner/'
+            required = {package + name for name in ('ImageSchemaExtractor.class', 'SentenceMarkerOffsets.class')}
+            if not required.issubset(archive.namelist()):
+                raise ValueError('Build the MeaningMiner extractor with utterance-wide marker support first')
+        if args.extractor_jar.resolve() == under(runtime, extractor).resolve():
+            raise ValueError('The build artifact must be separate from the deployment target')
+        sources[extractor] = args.extractor_jar.resolve()
     rows = []
-    for relative in files:
-        src, dst = under(SOURCE, relative), under(runtime, relative)
+    for relative, src in sources.items():
+        dst = under(runtime, relative)
         if not src.is_file() or dst.is_dir():
             raise ValueError('Invalid deployment file: ' + relative)
         rows.append({'path': relative, 'original_sha256': digest(dst), 'deployed_sha256': digest(src)})
@@ -84,7 +101,7 @@ def main():
         if digest(dst) != row['original_sha256']:
             raise ValueError('Target changed during deployment: ' + row['path'])
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(under(SOURCE, row['path']), dst)
+        shutil.copy2(sources[row['path']], dst)
         assert digest(dst) == row['deployed_sha256']
     print('Deployed and verified ' + str(len(rows)) + ' files.')
     print('Receipt: ' + str(receipt_path))

@@ -178,6 +178,12 @@ public final class HandCollisionTest {
                 clearance, clearance, clearance, clearance);
         require(settledTerminal.cleared && settledTerminal.pose.equals(base),
                 "one bounded direct-settling frame permits the subsequent exact rest endpoint");
+        Drift terminalDrift = terminalDrift(model, base);
+        HandCollision.Result driftSettle = model.settleAtBase(base, terminalDrift.previousProjected,
+                terminalDrift.previousCandidate, terminalDrift.clearance, terminalDrift.clearance,
+                0, 0);
+        require(driftSettle.cleared && driftSettle.pose.equals(base),
+                "direct settling preserves an accepted near-rest pose before releasing it to exact rest");
         Map<String, Double> twoTailCorrection = new LinkedHashMap<String, Double>(base);
         twoTailCorrection.put("l_shoulder_flexion", Double.valueOf(2.5));
         HandCollision.Result firstTail = model.settleAtBase(base, twoTailCorrection, base,
@@ -225,6 +231,35 @@ public final class HandCollisionTest {
         for (String joint : new String[] {"l_shoulder_abduct", "r_shoulder_abduct", "l_shoulder_flexion", "r_shoulder_flexion", "l_elbow_flexion", "r_elbow_flexion"})
             total += Math.abs(projected.get(joint).doubleValue() - candidate.get(joint).doubleValue());
         return total;
+    }
+    /** Finds a captured-FK case where re-basing a residual correction would lose clearance. */
+    private static Drift terminalDrift(HandCollision.Model model, Map<String, Double> base) {
+        String[] joints = new String[] {"l_shoulder_abduct", "r_shoulder_abduct", "l_shoulder_flexion", "r_shoulder_flexion", "l_elbow_flexion", "r_elbow_flexion"};
+        double[] rawOffsets = new double[] {-.2, -.05, -.01, -.002, .002, .01, .05, .2};
+        double[] corrections = new double[] {-.5, .5, -1, 1};
+        for (String joint : joints) for (double rawOffset : rawOffsets) for (double correction : corrections) {
+            Map<String, Double> previousCandidate = new LinkedHashMap<String, Double>(base);
+            previousCandidate.put(joint, Double.valueOf(previousCandidate.get(joint).doubleValue() + rawOffset));
+            Map<String, Double> previousProjected = new LinkedHashMap<String, Double>(previousCandidate);
+            previousProjected.put(joint, Double.valueOf(previousProjected.get(joint).doubleValue() + correction));
+            Map<String, Double> legacyRebased = new LinkedHashMap<String, Double>(base);
+            legacyRebased.put(joint, Double.valueOf(legacyRebased.get(joint).doubleValue() + correction));
+            HandCollision.Metrics accepted = model.measure(previousProjected);
+            HandCollision.Metrics rebased = model.measure(legacyRebased);
+            HandCollision.Metrics rest = model.measure(base);
+            if (accepted.boundaryMinimum() < 0 || rebased.boundaryMinimum() < 0 || rest.boundaryMinimum() < 0) continue;
+            if (accepted.minimum() <= rebased.minimum() + 1e-8) continue;
+            double required = (accepted.minimum() + rebased.minimum()) / 2.0;
+            if (rest.minimum() < required || accepted.fingerPalm < 0 || rebased.fingerPalm < 0 || rest.fingerPalm < 0) continue;
+            return new Drift(previousCandidate, previousProjected, required);
+        }
+        throw new AssertionError("fixture must expose a near-rest re-basing clearance regression");
+    }
+    private static final class Drift {
+        final Map<String, Double> previousCandidate, previousProjected; final double clearance;
+        Drift(Map<String, Double> previousCandidate, Map<String, Double> previousProjected, double clearance) {
+            this.previousCandidate = previousCandidate; this.previousProjected = previousProjected; this.clearance = clearance;
+        }
     }
     private static Map<String, double[]> knownZero() { Map<String, double[]> result = new LinkedHashMap<String, double[]>(); result.put("LeftArm", point(-1,0,0)); result.put("LeftForeArm", point(-1,0,1)); result.put("LeftHand", point(-1,0,2)); result.put("RightArm", point(1,0,0)); result.put("RightForeArm", point(1,0,1)); result.put("RightHand", point(1,0,2)); return result; }
     private static Map<String, double[]> knownLeftTurn() { Map<String, double[]> result = knownZero(); result.put("LeftForeArm", point(0,0,0)); result.put("LeftHand", point(1,0,0)); return result; }

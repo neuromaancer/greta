@@ -553,6 +553,16 @@ public final class HandCollision {
             if (!finite(previousClearance) || !finite(clearance) || !finite(previousFingerPalmClearance) || !finite(fingerPalmClearance))
                 throw new IllegalArgumentException("Invalid direct-settling clearance");
             Metrics before = measure(base);
+            // A late minimum-jerk frame can leave a sub-degree residual even
+            // though the exact calibrated rest is already safe.  Validate the
+            // real preceding pose directly before constructing a hypothetical
+            // retained correction against the final raw target.
+            if (releaseToBaseWithinStep(base, previousProjected, previousCandidate)
+                    && before.minimum() >= clearance && before.fingerPalm >= fingerPalmClearance
+                    && before.boundaryMinimum() >= 0
+                    && safePath(previousProjected, base, previousClearance, clearance,
+                            previousFingerPalmClearance, fingerPalmClearance))
+                return new Result(new LinkedHashMap<String, Double>(base), before, before, true, 0);
             Map<String, Double> retained = retainedCorrection(base, previousProjected, previousCandidate);
             Metrics retainedMetrics = measure(retained);
             if (retainedMetrics.minimum() < clearance || retainedMetrics.fingerPalm < fingerPalmClearance
@@ -585,6 +595,21 @@ public final class HandCollision {
             // Retaining without verified progress would only conceal a stuck
             // correction until the bounded tail expires.
             return new Result(retained, before, retainedMetrics, false, maxCorrection(retained, base));
+        }
+
+        /** The direct endpoint may clear only a residual released within one frame. */
+        private boolean releaseToBaseWithinStep(Map<String, Double> base, Map<String, Double> previousProjected,
+                Map<String, Double> previousCandidate) {
+            for (String joint : correctionJoints()) {
+                Double prior = previousProjected.get(joint), priorRaw = previousCandidate.get(joint);
+                Double rest = base.get(joint);
+                if (prior == null || priorRaw == null || rest == null) continue;
+                double priorCorrection = prior.doubleValue() - priorRaw.doubleValue();
+                if (Math.abs(priorCorrection) > RELAX_CORRECTION_STEP + EPSILON) return false;
+                if (priorCorrection < correctionMinimum(joint) - EPSILON || priorCorrection > correctionMaximum(joint) + EPSILON)
+                    throw new IllegalArgumentException("Previous hand correction is outside the bounded workspace: " + joint);
+            }
+            return true;
         }
 
         /** Preserves coupled corrective direction while reducing its largest axis by one degree. */

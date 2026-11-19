@@ -645,12 +645,13 @@ public final class SmokeProbe {
         }
         hideAutomaticReaderFrames();
         String azurePython = System.getProperty("gmit.azure.python");
-        if (azurePython != null) {
+        String azureReplay = System.getProperty("gmit.azure.replayFrom");
+        if (azurePython != null || azureReplay != null) {
             if (scenario == null || Boolean.getBoolean("gmit.preview"))
                 throw new IllegalArgumentException("Azure Speech requires a spoken GMIT scenario");
             call(objects.get("gmit-patient-b-manager"), "setTTS",
                     new Class<?>[]{greta.core.util.speech.TTS.class},
-                    new AzurePatientSpeech(azurePython, output.toPath()));
+                    new AzurePatientSpeech(azurePython, azureReplay, output.toPath()));
             log("voice actor=patient-b backend=azure voice=en-US-JennyNeural");
         } else {
             call(objects.get("gmit-patient-b-cereproc"), "setRateAndPitch",

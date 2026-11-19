@@ -21,5 +21,6 @@
     "bin/Environments/GMIT/group-mi-room.xml",
     "bin/GMIT/Start-GMIT.ps1",
     "bin/GMIT/local/.gitignore"
-  ]
+  ],
+  "extractor_jar": "bin/Common/Lib/Internal/lib/MeaningMiner.jar"
 }

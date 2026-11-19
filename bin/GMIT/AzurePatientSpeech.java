@@ -39,6 +39,7 @@ final class AzurePatientSpeech implements TTS {
     };
     private final Path python;
     private final Path worker;
+    private final Path replayFrom;
     private final Path output;
     private final ClientPhoneme phonemeMap = new ClientPhoneme();
     private Speech speech;
@@ -49,11 +50,16 @@ final class AzurePatientSpeech implements TTS {
     private long trailingSilenceTicks;
     private int requests;
 
-    AzurePatientSpeech(String python, Path output) {
-        this.python = Paths.get(python);
+    AzurePatientSpeech(String python, String replayFrom, Path output) {
+        this.python = python == null ? null : Paths.get(python);
+        this.replayFrom = replayFrom == null ? null : Paths.get(replayFrom);
         this.output = output;
         worker = Paths.get("..", "integrations", "gmit", "azure_speech.py").toAbsolutePath().normalize();
-        if (!this.python.isAbsolute() || !Files.isRegularFile(this.python) || !Files.isRegularFile(worker))
+        if ((this.python == null) == (this.replayFrom == null))
+            throw new IllegalArgumentException("Choose one Jenny speech source");
+        if (this.replayFrom != null && (!this.replayFrom.isAbsolute() || !Files.isDirectory(this.replayFrom)))
+            throw new IllegalArgumentException("Jenny replay requires an absolute directory from a previous recording");
+        if (this.python != null && (!this.python.isAbsolute() || !Files.isRegularFile(this.python) || !Files.isRegularFile(worker)))
             throw new IllegalArgumentException("Azure replay requires an absolute Python path and the deployed worker");
     }
 
@@ -94,6 +100,16 @@ final class AzurePatientSpeech implements TTS {
                 .replace("</prosody>", "</voice>")
                 .replace("<mark name=", "<bookmark mark=");
         Files.write(ssml, document.getBytes(StandardCharsets.UTF_8));
+        if (replayFrom != null) {
+            Path original = replayFrom.resolve(directory.getFileName());
+            if (!java.util.Arrays.equals(Files.readAllBytes(original.resolve("input.ssml")), Files.readAllBytes(ssml)))
+                throw new IOException("Recorded Jenny speech does not match this utterance and its bookmarks");
+            Files.copy(original.resolve("speech.wav"), wav);
+            Files.copy(original.resolve("timing.xml"), timing);
+            readResult(wav, timing);
+            System.out.println("GMIT_AZURE_TTS replayed actor=patient-b voice=" + VOICE + " request=" + requests);
+            return;
+        }
         Process process = new ProcessBuilder(python.toString(), worker.toString(), ssml.toAbsolutePath().toString(),
                 wav.toAbsolutePath().toString(), timing.toAbsolutePath().toString())
                 .redirectErrorStream(true).redirectOutput(directory.resolve("worker.log").toFile()).start();

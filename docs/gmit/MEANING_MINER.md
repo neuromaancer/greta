@@ -42,8 +42,33 @@ than silently dropping semantics.
 
 The precedence is `gmit.meaningminer.gesture.admission.<actor>`, then
 `gmit.meaningminer.gesture.admission`, then the room's `gesture_admission`, then
-`all` if the seated helper is unavailable. Valid values are `all` and
-`ideational-main`. The current three room seats use `ideational-main`.
+`all` if the seated helper is unavailable. The three seats use
+`ideational-main` by default. To compare policies on a recorded transcript,
+pass `-MeaningMiner -GestureAdmission ideational-main` or
+`-MeaningMiner -GestureAdmission ideational-grounded` to the runtime launcher.
+The grounded policy uses the actual word that contributed each schema. It
+admits at most one gesture candidate per valid ideational unit and can leave
+a unit speech-only. It preserves the extracted candidates in the audit log.
+Compare admitted IDs and realized signals separately because Greta's Planner
+also performs stochastic selection.
+
+The extractor uses utterance-wide word markers across sentence boundaries and
+reports the zero-based source token for each schema ID. Build the changed
+`auxiliary/MeaningMiner` module with the project's Java 8 toolchain. To deploy
+the resulting JAR to the copy used by the complete runtime's module loader,
+pass `--extractor-jar <built-MeaningMiner.jar>` to
+`python -m integrations.gmit.deploy --runtime <runtime>`. Inspect the plan
+and repeat with `--apply`. The deployment receipt covers the loaded JAR and
+supports the usual `--rollback <receipt.json>` command.
+
+In the November 19 matched seven-turn Pure replay, both policies saw the same
+29 extracted candidates and used the same seven WAV files byte for byte.
+With corrected timing, `ideational-main` realized ten gestures (eight OBJECT,
+one UP and one ENABLEMENT). The grounded English policy realized seven
+(five OBJECT and two ENABLEMENT). It replaced one phrasal-verb UP with an
+action already extracted in that sentence and suppressed three OBJECT
+candidates anchored to a reporting verb. These counts describe one recording
+per policy. Perceived semantic fit still requires viewer judgment.
 
 ## Seated adaptation and ownership
 

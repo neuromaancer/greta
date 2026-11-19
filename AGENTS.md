@@ -180,6 +180,10 @@ actor's calibrated rest. The authorized lower-activity setting uses each genuine
 ideational unit's main image schema before Planner; retain the complete raw
 extraction for audit and all selected bimanual outputs afterward. Missing or
 unresolvable main anchors fall back explicitly to all extracted intentions.
+For matched transcript comparisons, `ideational-grounded` may admit a
+word-supported candidate from the same unit or leave the unit speech-only.
+Use the extractor's utterance-wide source token indexes. Keep raw candidates,
+admitted anchors and realized gestures distinguishable in the evidence.
 This is semantic admission, not a confidence threshold. Root/legs, gaze, lips,
 blink, and optional MODIFF brows retain
 their existing owners; standing-body signals must not override the seated scene.

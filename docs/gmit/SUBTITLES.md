@@ -39,6 +39,13 @@ Allow up to 9.4 GB per minute captured at 25 fps, plus diagnostics. The
 ordinary recorder uses PNG. Both produce a captioned H.264/AAC MP4 with
 the same export command.
 
+For a controlled comparison against an earlier Jenny recording, use
+`-AzureReplayFrom <absolute prior run directory>` in place of `-AzurePython`.
+This reuses patient B's recorded WAV, visemes and bookmarks after checking
+the complete generated SSML for each B turn against the saved input.
+A changed utterance or bookmark sequence stops the replay. The other two
+voices use their regular CereProc synthesis paths.
+
 Without `-RecordVideo`, ordinary `-Replay`/`-GroupMI` uses a separate owned
 desktop subtitle overlay and still exports SRT/JSON. That overlay is not part of
 Ogre's image. Use movie recording for embedded subtitles. Import other transcript
